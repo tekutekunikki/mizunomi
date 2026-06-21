@@ -17,6 +17,13 @@ class IntakeRecordRepository(
         return dao.observeRecordsForDay(range.startMillis, range.endMillis)
     }
 
+    fun observeRecentRecords(days: Long): Flow<List<IntakeRecord>> {
+        val startDate = LocalDate.now(clock).minusDays(days - 1)
+        val startMillis = startDate.atStartOfDay(clock.zone).toInstant().toEpochMilli()
+        val endMillis = startDate.plusDays(days).atStartOfDay(clock.zone).toInstant().toEpochMilli()
+        return dao.observeRecordsForRange(startMillis, endMillis)
+    }
+
     fun observeTotalAmountForDay(date: LocalDate): Flow<Int> {
         val range = date.toMillisRange(clock.zone)
         return dao.observeTotalAmountForDay(range.startMillis, range.endMillis)
