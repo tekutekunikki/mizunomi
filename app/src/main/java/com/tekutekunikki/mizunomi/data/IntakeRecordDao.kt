@@ -1,0 +1,38 @@
+package com.tekutekunikki.mizunomi.data
+
+import androidx.room.Dao
+import androidx.room.Delete
+import androidx.room.Insert
+import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface IntakeRecordDao {
+    @Insert
+    suspend fun insert(record: IntakeRecord): Long
+
+    @Query(
+        """
+        SELECT *
+        FROM intake_records
+        WHERE timestamp >= :startMillis AND timestamp < :endMillis
+        ORDER BY timestamp DESC
+        """,
+    )
+    fun observeRecordsForDay(startMillis: Long, endMillis: Long): Flow<List<IntakeRecord>>
+
+    @Query(
+        """
+        SELECT COALESCE(SUM(amount_ml), 0)
+        FROM intake_records
+        WHERE timestamp >= :startMillis AND timestamp < :endMillis
+        """,
+    )
+    fun observeTotalAmountForDay(startMillis: Long, endMillis: Long): Flow<Int>
+
+    @Delete
+    suspend fun delete(record: IntakeRecord)
+
+    @Query("DELETE FROM intake_records WHERE id = :id")
+    suspend fun deleteById(id: Long)
+}
