@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,10 +48,13 @@ import com.tekutekunikki.mizunomi.data.MizunomiDatabase
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.TextStyle
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 private const val DailyGoalMl = 2000
+private const val WeeklyTrendDays = 7L
 
 class MainActivity : ComponentActivity() {
     private val repository by lazy {
@@ -72,11 +77,14 @@ fun MizunomiApp(repository: IntakeRecordRepository) {
         .collectAsState(initial = 0)
     val todayRecords by repository.observeTodayRecords()
         .collectAsState(initial = emptyList())
+    val weeklyRecords by repository.observeRecentRecords(WeeklyTrendDays)
+        .collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
     MizunomiAppContent(
         todayTotalMl = todayTotalMl,
         todayRecords = todayRecords,
+        weeklyRecords = weeklyRecords,
         onAddRecord = { drinkType, amountMl ->
             scope.launch {
                 repository.addRecord(
@@ -92,6 +100,7 @@ fun MizunomiApp(repository: IntakeRecordRepository) {
 fun MizunomiAppContent(
     todayTotalMl: Int,
     todayRecords: List<IntakeRecord>,
+    weeklyRecords: List<IntakeRecord>,
     onAddRecord: (drinkType: String, amountMl: Int) -> Unit,
 ) {
     val drinkTypes = listOf(
@@ -106,6 +115,9 @@ fun MizunomiAppContent(
     val progress = (todayTotalMl.toFloat() / DailyGoalMl).coerceIn(0f, 1f)
     val progressPercent = (progress * 100).toInt()
     val isGoalAchieved = todayTotalMl >= DailyGoalMl
+    val weeklyTrend = remember(weeklyRecords) {
+        buildWeeklyTrend(weeklyRecords)
+    }
     val drinkSummaries = drinkTypes.map { drinkType ->
         DrinkSummary(
             drinkType = drinkType,
@@ -155,6 +167,10 @@ fun MizunomiAppContent(
                         onDrinkTypeSelected = { selectedDrinkType = it },
                         onQuickAdd = { amountMl -> onAddRecord(selectedDrinkType, amountMl) },
                     )
+                }
+
+                item {
+                    WeeklyTrendCard(days = weeklyTrend)
                 }
 
                 if (drinkSummaries.isNotEmpty()) {
@@ -284,6 +300,87 @@ private fun AchievementBadge() {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun WeeklyTrendCard(days: List<DailyIntake>) {
+    val maxBarAmount = maxOf(DailyGoalMl, days.maxOfOrNull { it.amountMl } ?: 0)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "7-day trend",
+                color = Color(0xFF25384A),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            days.forEach { day ->
+                TrendBarRow(day = day, maxBarAmount = maxBarAmount)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrendBarRow(
+    day: DailyIntake,
+    maxBarAmount: Int,
+) {
+    val progress = (day.amountMl.toFloat() / maxBarAmount).coerceIn(0f, 1f)
+    val barColor = when {
+        day.amountMl >= DailyGoalMl -> Color(0xFF2EAD5B)
+        day.isToday -> Color(0xFF1683D8)
+        else -> Color(0xFF76B9E8)
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.width(42.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = day.dayLabel,
+                color = if (day.isToday) Color(0xFF0F6FAE) else Color(0xFF6C7A86),
+                fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Normal,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (day.amountMl >= DailyGoalMl) {
+                Text(
+                    text = "\u2713",
+                    color = Color(0xFF168344),
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 12.dp),
+            color = barColor,
+            trackColor = Color(0xFFE5EEF5),
+        )
+        Text(
+            text = "${day.amountMl} ml",
+            modifier = Modifier.width(72.dp),
+            color = if (day.isToday) Color(0xFF0F2F47) else Color(0xFF31485B),
+            fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
@@ -489,9 +586,38 @@ private fun Long.toTimeText(): String =
         .toLocalTime()
         .format(DateTimeFormatter.ofPattern("HH:mm"))
 
+private fun buildWeeklyTrend(records: List<IntakeRecord>): List<DailyIntake> {
+    val zoneId = ZoneId.systemDefault()
+    val today = LocalDate.now()
+    val totalsByDate = records.groupBy {
+        Instant.ofEpochMilli(it.timestamp)
+            .atZone(zoneId)
+            .toLocalDate()
+    }.mapValues { (_, dayRecords) ->
+        dayRecords.sumOf { it.amountMl }
+    }
+
+    return (WeeklyTrendDays - 1 downTo 0).map { daysAgo ->
+        val date = today.minusDays(daysAgo)
+        DailyIntake(
+            date = date,
+            dayLabel = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.JAPAN),
+            amountMl = totalsByDate[date] ?: 0,
+            isToday = date == today,
+        )
+    }
+}
+
 private data class DrinkSummary(
     val drinkType: String,
     val amountMl: Int,
+)
+
+private data class DailyIntake(
+    val date: LocalDate,
+    val dayLabel: String,
+    val amountMl: Int,
+    val isToday: Boolean,
 )
 
 @Preview(showBackground = true)
@@ -510,6 +636,15 @@ private fun MizunomiAppPreview() {
             IntakeRecord(
                 id = 2,
                 drinkType = "\u304A\u8336",
+                amountMl = 200,
+                timestamp = 0,
+                memo = null,
+            ),
+        ),
+        weeklyRecords = listOf(
+            IntakeRecord(
+                id = 1,
+                drinkType = "\u6C34",
                 amountMl = 200,
                 timestamp = 0,
                 memo = null,

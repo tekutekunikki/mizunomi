@@ -23,6 +23,16 @@ interface IntakeRecordDao {
 
     @Query(
         """
+        SELECT *
+        FROM intake_records
+        WHERE timestamp >= :startMillis AND timestamp < :endMillis
+        ORDER BY timestamp ASC
+        """,
+    )
+    fun observeRecordsForRange(startMillis: Long, endMillis: Long): Flow<List<IntakeRecord>>
+
+    @Query(
+        """
         SELECT COALESCE(SUM(amount_ml), 0)
         FROM intake_records
         WHERE timestamp >= :startMillis AND timestamp < :endMillis
