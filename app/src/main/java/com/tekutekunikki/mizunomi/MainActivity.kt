@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,7 +28,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -102,9 +102,17 @@ fun MizunomiAppContent(
     )
     val amounts = listOf(100, 200, 300, 500)
     var selectedDrinkType by remember { mutableStateOf(drinkTypes.first()) }
-    var selectedAmountMl by remember { mutableIntStateOf(amounts[1]) }
     val remainingMl = (DailyGoalMl - todayTotalMl).coerceAtLeast(0)
     val progress = (todayTotalMl.toFloat() / DailyGoalMl).coerceIn(0f, 1f)
+    val progressPercent = (progress * 100).toInt()
+    val drinkSummaries = drinkTypes.map { drinkType ->
+        DrinkSummary(
+            drinkType = drinkType,
+            amountMl = todayRecords
+                .filter { it.drinkType == drinkType }
+                .sumOf { it.amountMl },
+        )
+    }.filter { it.amountMl > 0 }
 
     MaterialTheme {
         Surface(
@@ -133,6 +141,7 @@ fun MizunomiAppContent(
                         todayTotalMl = todayTotalMl,
                         remainingMl = remainingMl,
                         progress = progress,
+                        progressPercent = progressPercent,
                     )
                 }
 
@@ -141,16 +150,20 @@ fun MizunomiAppContent(
                         drinkTypes = drinkTypes,
                         amounts = amounts,
                         selectedDrinkType = selectedDrinkType,
-                        selectedAmountMl = selectedAmountMl,
                         onDrinkTypeSelected = { selectedDrinkType = it },
-                        onAmountSelected = { selectedAmountMl = it },
-                        onAddRecord = { onAddRecord(selectedDrinkType, selectedAmountMl) },
+                        onQuickAdd = { amountMl -> onAddRecord(selectedDrinkType, amountMl) },
                     )
+                }
+
+                if (drinkSummaries.isNotEmpty()) {
+                    item {
+                        TypeSummaryCard(summaries = drinkSummaries)
+                    }
                 }
 
                 item {
                     Text(
-                        text = "Today's records",
+                        text = "Recent records",
                         color = Color(0xFF25384A),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -166,7 +179,7 @@ fun MizunomiAppContent(
                         )
                     }
                 } else {
-                    items(todayRecords, key = { it.id }) { record ->
+                    items(todayRecords.take(6), key = { it.id }) { record ->
                         IntakeRecordRow(record = record)
                     }
                 }
@@ -180,6 +193,7 @@ private fun SummaryCard(
     todayTotalMl: Int,
     remainingMl: Int,
     progress: Float,
+    progressPercent: Int,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -215,8 +229,53 @@ private fun SummaryCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(text = "Goal 2000 ml", color = Color(0xFF6C7A86))
-                Text(text = "\u3042\u3068 $remainingMl ml", color = Color(0xFF2D6A9F))
+                Text(text = "Goal 2,000 ml", color = Color(0xFF6C7A86))
+                Text(text = "$progressPercent%", color = Color(0xFF0F6FAE), fontWeight = FontWeight.SemiBold)
+            }
+            Text(
+                text = "\u3042\u3068 $remainingMl ml",
+                color = Color(0xFF2D6A9F),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TypeSummaryCard(summaries: List<DrinkSummary>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "By drink type",
+                color = Color(0xFF25384A),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            summaries.forEach { summary ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = summary.drinkType,
+                        color = Color(0xFF31485B),
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = "${summary.amountMl} ml",
+                        color = Color(0xFF0F2F47),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }
@@ -227,10 +286,8 @@ private fun AddIntakeCard(
     drinkTypes: List<String>,
     amounts: List<Int>,
     selectedDrinkType: String,
-    selectedAmountMl: Int,
     onDrinkTypeSelected: (String) -> Unit,
-    onAmountSelected: (Int) -> Unit,
-    onAddRecord: () -> Unit,
+    onQuickAdd: (Int) -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -243,7 +300,7 @@ private fun AddIntakeCard(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Add intake",
+                text = "Quick add",
                 color = Color(0xFF25384A),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
@@ -253,21 +310,10 @@ private fun AddIntakeCard(
                 selectedValue = selectedDrinkType,
                 onSelected = onDrinkTypeSelected,
             )
-            AmountGrid(
+            QuickAmountGrid(
                 amounts = amounts,
-                selectedAmountMl = selectedAmountMl,
-                onAmountSelected = onAmountSelected,
+                onQuickAdd = onQuickAdd,
             )
-            Button(
-                onClick = onAddRecord,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1683D8)),
-            ) {
-                Text(text = "Add", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            }
         }
     }
 }
@@ -294,10 +340,9 @@ private fun ChoiceRow(
 }
 
 @Composable
-private fun AmountGrid(
+private fun QuickAmountGrid(
     amounts: List<Int>,
-    selectedAmountMl: Int,
-    onAmountSelected: (Int) -> Unit,
+    onQuickAdd: (Int) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         amounts.chunked(2).forEach { rowAmounts ->
@@ -306,12 +351,21 @@ private fun AmountGrid(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 rowAmounts.forEach { amountMl ->
-                    SelectButton(
-                        text = "$amountMl ml",
-                        selected = selectedAmountMl == amountMl,
+                    Button(
+                        onClick = { onQuickAdd(amountMl) },
                         modifier = Modifier.weight(1f),
-                        onClick = { onAmountSelected(amountMl) },
-                    )
+                        shape = RoundedCornerShape(18.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1683D8)),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) {
+                        Text(
+                            text = "+${amountMl}ml",
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
                 if (rowAmounts.size == 1) {
                     Spacer(modifier = Modifier.weight(1f))
@@ -388,6 +442,11 @@ private fun Long.toTimeText(): String =
         .atZone(ZoneId.systemDefault())
         .toLocalTime()
         .format(DateTimeFormatter.ofPattern("HH:mm"))
+
+private data class DrinkSummary(
+    val drinkType: String,
+    val amountMl: Int,
+)
 
 @Preview(showBackground = true)
 @Composable
