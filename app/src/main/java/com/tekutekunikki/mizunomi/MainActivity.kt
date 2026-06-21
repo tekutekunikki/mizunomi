@@ -105,6 +105,7 @@ fun MizunomiAppContent(
     val remainingMl = (DailyGoalMl - todayTotalMl).coerceAtLeast(0)
     val progress = (todayTotalMl.toFloat() / DailyGoalMl).coerceIn(0f, 1f)
     val progressPercent = (progress * 100).toInt()
+    val isGoalAchieved = todayTotalMl >= DailyGoalMl
     val drinkSummaries = drinkTypes.map { drinkType ->
         DrinkSummary(
             drinkType = drinkType,
@@ -142,6 +143,7 @@ fun MizunomiAppContent(
                         remainingMl = remainingMl,
                         progress = progress,
                         progressPercent = progressPercent,
+                        isGoalAchieved = isGoalAchieved,
                     )
                 }
 
@@ -194,11 +196,14 @@ private fun SummaryCard(
     remainingMl: Int,
     progress: Float,
     progressPercent: Int,
+    isGoalAchieved: Boolean,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isGoalAchieved) Color(0xFFF2FBF6) else Color.White,
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -217,12 +222,15 @@ private fun SummaryCard(
                 fontWeight = FontWeight.Bold,
                 lineHeight = 52.sp,
             )
+            if (isGoalAchieved) {
+                AchievementBadge()
+            }
             LinearProgressIndicator(
                 progress = { progress },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(10.dp),
-                color = Color(0xFF2A9DF4),
+                color = if (isGoalAchieved) Color(0xFF2EAD5B) else Color(0xFF2A9DF4),
                 trackColor = Color(0xFFE5EEF5),
             )
             Row(
@@ -233,10 +241,48 @@ private fun SummaryCard(
                 Text(text = "$progressPercent%", color = Color(0xFF0F6FAE), fontWeight = FontWeight.SemiBold)
             }
             Text(
-                text = "\u3042\u3068 $remainingMl ml",
-                color = Color(0xFF2D6A9F),
+                text = if (isGoalAchieved) {
+                    "\u304A\u3081\u3067\u3068\u3046\u3054\u3056\u3044\u307E\u3059\uFF01"
+                } else {
+                    "\u3042\u3068 $remainingMl ml"
+                },
+                color = if (isGoalAchieved) Color(0xFF1F8F4D) else Color(0xFF2D6A9F),
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
+    }
+}
+
+@Composable
+private fun AchievementBadge() {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFE2F7EA)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "\u2713",
+                color = Color(0xFF168344),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Column {
+                Text(
+                    text = "\u4ECA\u65E5\u306E\u76EE\u6A19\u3092\u9054\u6210\u3057\u307E\u3057\u305F\uFF01",
+                    color = Color(0xFF146C3A),
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "\u9054\u6210\u30D0\u30C3\u30B8",
+                    color = Color(0xFF3E7A56),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }
 }
