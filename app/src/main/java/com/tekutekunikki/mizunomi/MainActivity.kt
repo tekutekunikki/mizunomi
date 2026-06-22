@@ -49,6 +49,7 @@ import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
 import com.tekutekunikki.mizunomi.data.MizunomiDatabase
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.time.format.DateTimeFormatter
@@ -136,6 +137,7 @@ fun MizunomiAppContent(
     val progress = (todayTotalMl.toFloat() / DailyGoalMl).coerceIn(0f, 1f)
     val progressPercent = (progress * 100).toInt()
     val isGoalAchieved = todayTotalMl >= DailyGoalMl
+    val paceStatus = buildPaceStatus(todayTotalMl, LocalTime.now())
     val weeklyTrend = remember(weeklyRecords) {
         buildWeeklyTrend(weeklyRecords)
     }
@@ -205,6 +207,10 @@ fun MizunomiAppContent(
                 }
 
                 item {
+                    PaceStatusCard(status = paceStatus)
+                }
+
+                item {
                     AddIntakeCard(
                         drinkTypes = drinkTypes,
                         amounts = amounts,
@@ -251,6 +257,73 @@ fun MizunomiAppContent(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PaceStatusCard(status: PaceStatus) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "\u4ECA\u65E5\u306E\u30DA\u30FC\u30B9",
+                color = Color(0xFF25384A),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "\u76EE\u5B89\uFF1A${status.targetTimeLabel}\u307E\u3067\u306B",
+                    color = Color(0xFF6C7A86),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "${status.expectedMl} ml",
+                    color = Color(0xFF0F2F47),
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "\u73FE\u5728\uFF1A${status.actualMl} ml",
+                    color = Color(0xFF31485B),
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (status.remainingMl > 0) {
+                        "\u3042\u3068 ${status.remainingMl} ml"
+                    } else {
+                        "\u9806\u8ABF\u3067\u3059"
+                    },
+                    color = status.color,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Text(
+                text = status.message,
+                color = status.color,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = status.detail,
+                color = Color(0xFF6C7A86),
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
@@ -790,6 +863,52 @@ private fun buildWeeklyTrend(records: List<IntakeRecord>): List<DailyIntake> {
     }
 }
 
+private fun buildPaceStatus(
+    actualMl: Int,
+    now: LocalTime,
+): PaceStatus {
+    val target = paceTargets.lastOrNull { !now.isBefore(it.time) } ?: paceTargets.first()
+    val remainingMl = (target.expectedMl - actualMl).coerceAtLeast(0)
+    val state = when {
+        actualMl >= target.expectedMl -> PaceState.OnTrack
+        target.expectedMl < 300 -> PaceState.OnTrack
+        remainingMl < 300 -> PaceState.SlightlyBehind
+        else -> PaceState.Behind
+    }
+
+    return PaceStatus(
+        targetTimeLabel = target.time.format(DateTimeFormatter.ofPattern("H:mm")),
+        expectedMl = target.expectedMl,
+        actualMl = actualMl,
+        remainingMl = remainingMl,
+        message = when (state) {
+            PaceState.OnTrack -> "\u3044\u3044\u30DA\u30FC\u30B9\u3067\u3059"
+            PaceState.SlightlyBehind -> "\u5C11\u3057\u9045\u308C\u3066\u3044\u307E\u3059"
+            PaceState.Behind -> "\u304B\u306A\u308A\u9045\u308C\u3066\u3044\u307E\u3059"
+        },
+        detail = when (state) {
+            PaceState.OnTrack -> "\u3053\u306E\u8ABF\u5B50\u3067\u7121\u7406\u306A\u304F\u7D9A\u3051\u307E\u3057\u3087\u3046"
+            PaceState.SlightlyBehind -> "\u4E00\u676F\u98F2\u3093\u3067\u304A\u304D\u307E\u3057\u3087\u3046"
+            PaceState.Behind -> "\u4ECA\u65E5\u306E\u76EE\u6A19\u307E\u3067\u5C11\u3057\u9045\u308C\u3066\u3044\u307E\u3059"
+        },
+        color = when (state) {
+            PaceState.OnTrack -> Color(0xFF168344)
+            PaceState.SlightlyBehind -> Color(0xFFB06C00)
+            PaceState.Behind -> Color(0xFFB3261E)
+        },
+    )
+}
+
+private val paceTargets = listOf(
+    PaceTarget(time = LocalTime.of(8, 0), expectedMl = 0),
+    PaceTarget(time = LocalTime.of(10, 0), expectedMl = 300),
+    PaceTarget(time = LocalTime.of(12, 0), expectedMl = 700),
+    PaceTarget(time = LocalTime.of(15, 0), expectedMl = 1100),
+    PaceTarget(time = LocalTime.of(18, 0), expectedMl = 1500),
+    PaceTarget(time = LocalTime.of(21, 0), expectedMl = 1900),
+    PaceTarget(time = LocalTime.of(22, 0), expectedMl = 2000),
+)
+
 private data class DrinkSummary(
     val drinkType: String,
     val amountMl: Int,
@@ -801,6 +920,27 @@ private data class DailyIntake(
     val amountMl: Int,
     val isToday: Boolean,
 )
+
+private data class PaceTarget(
+    val time: LocalTime,
+    val expectedMl: Int,
+)
+
+private data class PaceStatus(
+    val targetTimeLabel: String,
+    val expectedMl: Int,
+    val actualMl: Int,
+    val remainingMl: Int,
+    val message: String,
+    val detail: String,
+    val color: Color,
+)
+
+private enum class PaceState {
+    OnTrack,
+    SlightlyBehind,
+    Behind,
+}
 
 @Preview(showBackground = true)
 @Composable
