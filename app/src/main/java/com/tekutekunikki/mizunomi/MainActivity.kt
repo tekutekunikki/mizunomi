@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -27,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -93,6 +95,21 @@ fun MizunomiApp(repository: IntakeRecordRepository) {
                 )
             }
         },
+        onUpdateRecord = { record, drinkType, amountMl ->
+            scope.launch {
+                repository.updateRecord(
+                    record.copy(
+                        drinkType = drinkType,
+                        amountMl = amountMl,
+                    ),
+                )
+            }
+        },
+        onDeleteRecord = { record ->
+            scope.launch {
+                repository.deleteRecord(record)
+            }
+        },
     )
 }
 
@@ -102,6 +119,8 @@ fun MizunomiAppContent(
     todayRecords: List<IntakeRecord>,
     weeklyRecords: List<IntakeRecord>,
     onAddRecord: (drinkType: String, amountMl: Int) -> Unit,
+    onUpdateRecord: (record: IntakeRecord, drinkType: String, amountMl: Int) -> Unit,
+    onDeleteRecord: (record: IntakeRecord) -> Unit,
 ) {
     val drinkTypes = listOf(
         "\u6C34",
@@ -111,6 +130,8 @@ fun MizunomiAppContent(
     )
     val amounts = listOf(100, 200, 300, 500)
     var selectedDrinkType by remember { mutableStateOf(drinkTypes.first()) }
+    var editingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
+    var deletingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     val remainingMl = (DailyGoalMl - todayTotalMl).coerceAtLeast(0)
     val progress = (todayTotalMl.toFloat() / DailyGoalMl).coerceIn(0f, 1f)
     val progressPercent = (progress * 100).toInt()
@@ -128,6 +149,30 @@ fun MizunomiAppContent(
     }.filter { it.amountMl > 0 }
 
     MaterialTheme {
+        editingRecord?.let { record ->
+            EditRecordDialog(
+                record = record,
+                drinkTypes = drinkTypes,
+                amounts = amounts,
+                onDismiss = { editingRecord = null },
+                onSave = { drinkType, amountMl ->
+                    onUpdateRecord(record, drinkType, amountMl)
+                    editingRecord = null
+                },
+            )
+        }
+
+        deletingRecord?.let { record ->
+            DeleteRecordDialog(
+                record = record,
+                onDismiss = { deletingRecord = null },
+                onConfirmDelete = {
+                    onDeleteRecord(record)
+                    deletingRecord = null
+                },
+            )
+        }
+
         Surface(
             modifier = Modifier
                 .fillMaxSize()
@@ -198,12 +243,97 @@ fun MizunomiAppContent(
                     }
                 } else {
                     items(todayRecords.take(6), key = { it.id }) { record ->
-                        IntakeRecordRow(record = record)
+                        IntakeRecordRow(
+                            record = record,
+                            onEdit = { editingRecord = it },
+                            onDelete = { deletingRecord = it },
+                        )
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun EditRecordDialog(
+    record: IntakeRecord,
+    drinkTypes: List<String>,
+    amounts: List<Int>,
+    onDismiss: () -> Unit,
+    onSave: (drinkType: String, amountMl: Int) -> Unit,
+) {
+    var selectedDrinkType by remember(record.id) { mutableStateOf(record.drinkType) }
+    var selectedAmountMl by remember(record.id) { mutableStateOf(record.amountMl) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(text = "Edit record")
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = record.timestamp.toTimeText(),
+                    color = Color(0xFF6C7A86),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                ChoiceRow(
+                    values = drinkTypes,
+                    selectedValue = selectedDrinkType,
+                    onSelected = { selectedDrinkType = it },
+                )
+                AmountSelectionGrid(
+                    amounts = amounts,
+                    selectedAmountMl = selectedAmountMl,
+                    onSelected = { selectedAmountMl = it },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(selectedDrinkType, selectedAmountMl) },
+            ) {
+                Text(text = "Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = "Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeleteRecordDialog(
+    record: IntakeRecord,
+    onDismiss: () -> Unit,
+    onConfirmDelete: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(text = "\u3053\u306E\u8A18\u9332\u3092\u524A\u9664\u3057\u307E\u3059\u304B\uFF1F")
+        },
+        text = {
+            Text(
+                text = "${record.drinkType} ${record.amountMl} ml",
+                color = Color(0xFF31485B),
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirmDelete) {
+                Text(text = "\u524A\u9664", color = Color(0xFFB3261E))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = "\u30AD\u30E3\u30F3\u30BB\u30EB")
+            }
+        },
+    )
 }
 
 @Composable
@@ -519,6 +649,34 @@ private fun QuickAmountGrid(
 }
 
 @Composable
+private fun AmountSelectionGrid(
+    amounts: List<Int>,
+    selectedAmountMl: Int,
+    onSelected: (Int) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        amounts.chunked(2).forEach { rowAmounts ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                rowAmounts.forEach { amountMl ->
+                    SelectButton(
+                        text = "$amountMl ml",
+                        selected = selectedAmountMl == amountMl,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onSelected(amountMl) },
+                    )
+                }
+                if (rowAmounts.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SelectButton(
     text: String,
     selected: Boolean,
@@ -545,7 +703,11 @@ private fun SelectButton(
 }
 
 @Composable
-private fun IntakeRecordRow(record: IntakeRecord) {
+private fun IntakeRecordRow(
+    record: IntakeRecord,
+    onEdit: (IntakeRecord) -> Unit,
+    onDelete: (IntakeRecord) -> Unit,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -559,7 +721,7 @@ private fun IntakeRecordRow(record: IntakeRecord) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = record.drinkType,
                     color = Color(0xFF263B4D),
@@ -571,11 +733,31 @@ private fun IntakeRecordRow(record: IntakeRecord) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Text(
-                text = "${record.amountMl} ml",
-                color = Color(0xFF0F2F47),
-                fontWeight = FontWeight.Bold,
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "${record.amountMl} ml",
+                    color = Color(0xFF0F2F47),
+                    fontWeight = FontWeight.Bold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    TextButton(
+                        onClick = { onEdit(record) },
+                        contentPadding = PaddingValues(horizontal = 6.dp),
+                    ) {
+                        Text(text = "Edit", fontSize = 12.sp)
+                    }
+                    TextButton(
+                        onClick = { onDelete(record) },
+                        contentPadding = PaddingValues(horizontal = 6.dp),
+                    ) {
+                        Text(
+                            text = "Delete",
+                            color = Color(0xFFB3261E),
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -651,5 +833,7 @@ private fun MizunomiAppPreview() {
             ),
         ),
         onAddRecord = { _, _ -> },
+        onUpdateRecord = { _, _, _ -> },
+        onDeleteRecord = {},
     )
 }
