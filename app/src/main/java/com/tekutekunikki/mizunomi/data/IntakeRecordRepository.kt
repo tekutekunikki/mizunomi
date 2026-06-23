@@ -48,6 +48,10 @@ class IntakeRecordRepository(
         dao.delete(record)
     }
 
+    suspend fun updateRecord(record: IntakeRecord) {
+        dao.update(record)
+    }
+
     suspend fun deleteRecordById(id: Long) {
         dao.deleteById(id)
     }

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -42,6 +43,9 @@ interface IntakeRecordDao {
 
     @Delete
     suspend fun delete(record: IntakeRecord)
+
+    @Update
+    suspend fun update(record: IntakeRecord)
 
     @Query("DELETE FROM intake_records WHERE id = :id")
     suspend fun deleteById(id: Long)
