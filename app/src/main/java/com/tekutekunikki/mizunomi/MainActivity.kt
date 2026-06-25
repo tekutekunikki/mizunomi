@@ -1,8 +1,14 @@
 package com.tekutekunikki.mizunomi
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.os.Bundle
+import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,7 +23,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -155,6 +163,17 @@ fun MizunomiAppContent(
     var selectedDrinkType by remember { mutableStateOf(drinkTypes.first()) }
     var editingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     var deletingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
+    var voiceInputState by remember { mutableStateOf<VoiceInputState?>(null) }
+    val voiceInputLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val recognizedText = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            voiceInputState = buildVoiceInputState(recognizedText)
+        }
+    }
     val remainingMl = (DailyGoalMl - todayTotalMl).coerceAtLeast(0)
     val progress = (todayTotalMl.toFloat() / DailyGoalMl).coerceIn(0f, 1f)
     val progressPercent = (progress * 100).toInt()
@@ -196,6 +215,20 @@ fun MizunomiAppContent(
                 onConfirmDelete = {
                     onDeleteRecord(record)
                     deletingRecord = null
+                },
+            )
+        }
+
+        voiceInputState?.let { state ->
+            VoiceIntakeDialog(
+                state = state,
+                drinkTypes = drinkTypes,
+                amounts = amounts,
+                onDismiss = { voiceInputState = null },
+                onSave = { drinkType, amountMl ->
+                    onAddRecord(drinkType, amountMl)
+                    selectedDrinkType = drinkType
+                    voiceInputState = null
                 },
             )
         }
@@ -248,6 +281,17 @@ fun MizunomiAppContent(
                         selectedDrinkType = selectedDrinkType,
                         onDrinkTypeSelected = { selectedDrinkType = it },
                         onQuickAdd = { amountMl -> onAddRecord(selectedDrinkType, amountMl) },
+                        onVoiceInput = {
+                            try {
+                                voiceInputLauncher.launch(buildVoiceRecognitionIntent())
+                            } catch (exception: ActivityNotFoundException) {
+                                voiceInputState = VoiceInputState(
+                                    rawText = null,
+                                    candidate = null,
+                                    errorMessage = "\u7AEF\u672B\u306E\u97F3\u58F0\u5165\u529B\u3092\u8D77\u52D5\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
+                                )
+                            }
+                        },
                     )
                 }
 
@@ -290,6 +334,106 @@ fun MizunomiAppContent(
             }
         }
     }
+}
+
+@Composable
+private fun VoiceIntakeDialog(
+    state: VoiceInputState,
+    drinkTypes: List<String>,
+    amounts: List<Int>,
+    onDismiss: () -> Unit,
+    onSave: (drinkType: String, amountMl: Int) -> Unit,
+) {
+    var isEditing by remember(state.rawText, state.errorMessage) {
+        mutableStateOf(state.candidate == null)
+    }
+    var selectedDrinkType by remember(state.rawText, state.errorMessage) {
+        mutableStateOf(state.candidate?.drinkType ?: drinkTypes.first())
+    }
+    var selectedAmountMl by remember(state.rawText, state.errorMessage) {
+        mutableStateOf(
+            state.candidate
+                ?.amountMl
+                ?.takeIf { it in amounts }
+                ?: amounts.first(),
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(text = "\u97F3\u58F0\u5165\u529B\u306E\u7D50\u679C")
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                state.rawText?.let { rawText ->
+                    Text(
+                        text = "\u8A8D\u8B58\u7D50\u679C\uFF1A$rawText",
+                        color = Color(0xFF6C7A86),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                if (state.candidate != null && !isEditing) {
+                    Text(
+                        text = "${state.candidate.drinkType} ${state.candidate.amountMl}ml \u3068\u3057\u3066\u8A18\u9332\u3057\u307E\u3059\u304B\uFF1F",
+                        color = Color(0xFF31485B),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                } else {
+                    Text(
+                        text = state.errorMessage
+                            ?: "\u98F2\u307F\u7269\u3068\u91CF\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
+                        color = Color(0xFF31485B),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    ChoiceRow(
+                        values = drinkTypes,
+                        selectedValue = selectedDrinkType,
+                        onSelected = { selectedDrinkType = it },
+                    )
+                    AmountSelectionGrid(
+                        amounts = amounts,
+                        selectedAmountMl = selectedAmountMl,
+                        onSelected = { selectedAmountMl = it },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (state.candidate != null && !isEditing) {
+                TextButton(
+                    onClick = {
+                        onSave(state.candidate.drinkType, state.candidate.amountMl)
+                    },
+                ) {
+                    Text(text = "\u4FDD\u5B58")
+                }
+            } else {
+                TextButton(
+                    onClick = { onSave(selectedDrinkType, selectedAmountMl) },
+                ) {
+                    Text(text = "\u4FDD\u5B58")
+                }
+            }
+        },
+        dismissButton = {
+            if (state.candidate != null && !isEditing) {
+                TextButton(onClick = { isEditing = true }) {
+                    Text(text = "\u4FEE\u6B63")
+                }
+            } else {
+                TextButton(onClick = onDismiss) {
+                    Text(text = "Cancel")
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -412,7 +556,12 @@ private fun EditRecordDialog(
             Text(text = "Edit record")
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
                 Text(
                     text = record.timestamp.toTimeText(),
                     color = Color(0xFF6C7A86),
@@ -701,6 +850,7 @@ private fun AddIntakeCard(
     selectedDrinkType: String,
     onDrinkTypeSelected: (String) -> Unit,
     onQuickAdd: (Int) -> Unit,
+    onVoiceInput: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -718,6 +868,17 @@ private fun AddIntakeCard(
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
+            OutlinedButton(
+                onClick = onVoiceInput,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    text = "\uD83C\uDFA4 \u97F3\u58F0\u3067\u8A18\u9332",
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
             ChoiceRow(
                 values = drinkTypes,
                 selectedValue = selectedDrinkType,
@@ -973,6 +1134,77 @@ private fun buildPaceStatus(
     )
 }
 
+private fun buildVoiceRecognitionIntent(): Intent =
+    Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(
+            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+        )
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.JAPAN.toLanguageTag())
+        putExtra(RecognizerIntent.EXTRA_PROMPT, "\u98F2\u307F\u7269\u3068\u91CF\u3092\u8A71\u3057\u3066\u304F\u3060\u3055\u3044")
+    }
+
+private fun buildVoiceInputState(text: String?): VoiceInputState =
+    if (text.isNullOrBlank()) {
+        VoiceInputState(
+            rawText = text,
+            candidate = null,
+            errorMessage = "\u3046\u307E\u304F\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u98F2\u307F\u7269\u3068\u91CF\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
+        )
+    } else {
+        val candidate = parseVoiceIntake(text)
+        VoiceInputState(
+            rawText = text,
+            candidate = candidate,
+            errorMessage = if (candidate == null) {
+                "\u3046\u307E\u304F\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u98F2\u307F\u7269\u3068\u91CF\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002"
+            } else {
+                null
+            },
+        )
+    }
+
+private fun parseVoiceIntake(text: String): VoiceIntakeCandidate? {
+    val normalizedText = text.normalizeDigits()
+    val amountMl = Regex("\\d+")
+        .find(normalizedText)
+        ?.value
+        ?.toIntOrNull()
+        ?: return null
+    val drinkType = classifyVoiceDrinkType(normalizedText)
+
+    return VoiceIntakeCandidate(
+        drinkType = drinkType,
+        amountMl = amountMl,
+        rawText = text,
+    )
+}
+
+private fun classifyVoiceDrinkType(text: String): String =
+    when {
+        text.containsAny("ポカリ", "ポカリスエット", "アクエリアス", "スポーツドリンク") -> "\u30B9\u30DD\u30FC\u30C4\u30C9\u30EA\u30F3\u30AF"
+        text.containsAny("コーラ", "炭酸") -> "\u70AD\u9178\u98F2\u6599"
+        text.containsAny("牛乳", "カツゲン", "コーヒー牛乳", "乳飲料") -> "\u4E73\u98F2\u6599"
+        text.containsAny("ビール", "酒", "ワイン", "ハイボール") -> "\u30A2\u30EB\u30B3\u30FC\u30EB"
+        text.containsAny("午後ティー", "午後の紅茶", "ジュース", "オレンジ", "りんご") -> "\u30B8\u30E5\u30FC\u30B9"
+        text.containsAny("お茶", "緑茶", "麦茶") -> "\u304A\u8336"
+        text.containsAny("コーヒー", "ブラック") -> "\u30B3\u30FC\u30D2\u30FC"
+        text.contains("水") -> "\u6C34"
+        text.contains("その他") -> "\u305D\u306E\u4ED6"
+        else -> "\u305D\u306E\u4ED6"
+    }
+
+private fun String.containsAny(vararg keywords: String): Boolean =
+    keywords.any { contains(it) }
+
+private fun String.normalizeDigits(): String =
+    map { char ->
+        when (char) {
+            in '\uFF10'..'\uFF19' -> '0' + (char - '\uFF10')
+            else -> char
+        }
+    }.joinToString(separator = "")
+
 private fun buildDrinkNotices(
     records: List<IntakeRecord>,
     todayTotalMl: Int,
@@ -1034,6 +1266,18 @@ private data class DrinkSummary(
 private data class DrinkNotice(
     val title: String,
     val message: String,
+)
+
+private data class VoiceInputState(
+    val rawText: String?,
+    val candidate: VoiceIntakeCandidate?,
+    val errorMessage: String?,
+)
+
+private data class VoiceIntakeCandidate(
+    val drinkType: String,
+    val amountMl: Int,
+    val rawText: String,
 )
 
 private data class DailyIntake(
