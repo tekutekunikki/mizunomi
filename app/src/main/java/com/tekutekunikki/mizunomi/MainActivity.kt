@@ -58,6 +58,33 @@ import kotlinx.coroutines.launch
 
 private const val DailyGoalMl = 2000
 private const val WeeklyTrendDays = 7L
+private const val SweetDrinkWarningThresholdMl = 500
+private const val BalancedDrinkTotalThresholdMl = 1000
+private const val WaterTeaMinimumThresholdMl = 500
+
+private val DrinkTypes = listOf(
+    "\u6C34",
+    "\u304A\u8336",
+    "\u30B3\u30FC\u30D2\u30FC",
+    "\u30B8\u30E5\u30FC\u30B9",
+    "\u30B9\u30DD\u30FC\u30C4\u30C9\u30EA\u30F3\u30AF",
+    "\u4E73\u98F2\u6599",
+    "\u70AD\u9178\u98F2\u6599",
+    "\u30A2\u30EB\u30B3\u30FC\u30EB",
+    "\u305D\u306E\u4ED6",
+)
+
+private val SweetDrinkTypes = setOf(
+    "\u30B8\u30E5\u30FC\u30B9",
+    "\u30B9\u30DD\u30FC\u30C4\u30C9\u30EA\u30F3\u30AF",
+    "\u4E73\u98F2\u6599",
+    "\u70AD\u9178\u98F2\u6599",
+)
+
+private val WaterTeaDrinkTypes = setOf(
+    "\u6C34",
+    "\u304A\u8336",
+)
 
 class MainActivity : ComponentActivity() {
     private val repository by lazy {
@@ -123,12 +150,7 @@ fun MizunomiAppContent(
     onUpdateRecord: (record: IntakeRecord, drinkType: String, amountMl: Int) -> Unit,
     onDeleteRecord: (record: IntakeRecord) -> Unit,
 ) {
-    val drinkTypes = listOf(
-        "\u6C34",
-        "\u304A\u8336",
-        "\u30B3\u30FC\u30D2\u30FC",
-        "\u305D\u306E\u4ED6",
-    )
+    val drinkTypes = DrinkTypes
     val amounts = listOf(100, 200, 300, 500)
     var selectedDrinkType by remember { mutableStateOf(drinkTypes.first()) }
     var editingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
@@ -140,6 +162,9 @@ fun MizunomiAppContent(
     val paceStatus = buildPaceStatus(todayTotalMl, LocalTime.now())
     val weeklyTrend = remember(weeklyRecords) {
         buildWeeklyTrend(weeklyRecords)
+    }
+    val drinkNotices = remember(todayRecords, todayTotalMl) {
+        buildDrinkNotices(todayRecords, todayTotalMl)
     }
     val drinkSummaries = drinkTypes.map { drinkType ->
         DrinkSummary(
@@ -210,6 +235,12 @@ fun MizunomiAppContent(
                     PaceStatusCard(status = paceStatus)
                 }
 
+                if (drinkNotices.isNotEmpty()) {
+                    item {
+                        DrinkNoticeCard(notices = drinkNotices)
+                    }
+                }
+
                 item {
                     AddIntakeCard(
                         drinkTypes = drinkTypes,
@@ -255,6 +286,42 @@ fun MizunomiAppContent(
                             onDelete = { deletingRecord = it },
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DrinkNoticeCard(notices: List<DrinkNotice>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "\u98F2\u307F\u7269\u30D0\u30E9\u30F3\u30B9",
+                color = Color(0xFF25384A),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            notices.forEach { notice ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = notice.title,
+                        color = Color(0xFF8A5A00),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = notice.message,
+                        color = Color(0xFF6C7A86),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         }
@@ -670,17 +737,24 @@ private fun ChoiceRow(
     selectedValue: String,
     onSelected: (String) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        values.forEach { value ->
-            SelectButton(
-                text = value,
-                selected = selectedValue == value,
-                modifier = Modifier.weight(1f),
-                onClick = { onSelected(value) },
-            )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        values.chunked(2).forEach { rowValues ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                rowValues.forEach { value ->
+                    SelectButton(
+                        text = value,
+                        selected = selectedValue == value,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onSelected(value) },
+                    )
+                }
+                if (rowValues.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
         }
     }
 }
@@ -769,7 +843,7 @@ private fun SelectButton(
             text = text,
             maxLines = 1,
             overflow = TextOverflow.Clip,
-            fontSize = 14.sp,
+            fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
     }
@@ -899,6 +973,49 @@ private fun buildPaceStatus(
     )
 }
 
+private fun buildDrinkNotices(
+    records: List<IntakeRecord>,
+    todayTotalMl: Int,
+): List<DrinkNotice> {
+    val sweetDrinkTotalMl = records
+        .filter { it.drinkType in SweetDrinkTypes }
+        .sumOf { it.amountMl }
+    val hasAlcohol = records.any { it.drinkType == "\u30A2\u30EB\u30B3\u30FC\u30EB" }
+    val waterTeaTotalMl = records
+        .filter { it.drinkType in WaterTeaDrinkTypes }
+        .sumOf { it.amountMl }
+
+    return buildList {
+        if (sweetDrinkTotalMl >= SweetDrinkWarningThresholdMl) {
+            add(
+                DrinkNotice(
+                    title = "\u7518\u3044\u98F2\u307F\u7269\u304C\u5C11\u3057\u591A\u3081\u3067\u3059",
+                    message = "\u6B21\u306E\u4E00\u676F\u306F\u6C34\u304B\u304A\u8336\u3092\u9078\u3093\u3067\u307F\u307E\u3057\u3087\u3046\u3002",
+                ),
+            )
+        }
+        if (hasAlcohol) {
+            add(
+                DrinkNotice(
+                    title = "\u30A2\u30EB\u30B3\u30FC\u30EB\u306E\u8A18\u9332\u304C\u3042\u308A\u307E\u3059",
+                    message = "\u4ECA\u65E5\u306F\u6C34\u3082\u4E00\u7DD2\u306B\u3068\u3063\u3066\u304A\u304D\u307E\u3057\u3087\u3046\u3002",
+                ),
+            )
+        }
+        if (
+            todayTotalMl >= BalancedDrinkTotalThresholdMl &&
+            waterTeaTotalMl < WaterTeaMinimumThresholdMl
+        ) {
+            add(
+                DrinkNotice(
+                    title = "\u6C34\u30FB\u304A\u8336\u304C\u5C11\u306A\u3081\u3067\u3059",
+                    message = "\u6B21\u306F\u3084\u3055\u3057\u304F\u4E00\u676F\u8DB3\u3057\u3066\u304A\u304D\u307E\u3057\u3087\u3046\u3002",
+                ),
+            )
+        }
+    }
+}
+
 private val paceTargets = listOf(
     PaceTarget(time = LocalTime.of(8, 0), expectedMl = 0),
     PaceTarget(time = LocalTime.of(10, 0), expectedMl = 300),
@@ -912,6 +1029,11 @@ private val paceTargets = listOf(
 private data class DrinkSummary(
     val drinkType: String,
     val amountMl: Int,
+)
+
+private data class DrinkNotice(
+    val title: String,
+    val message: String,
 )
 
 private data class DailyIntake(
