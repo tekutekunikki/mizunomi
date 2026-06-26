@@ -41,6 +41,15 @@ interface IntakeRecordDao {
     )
     fun observeTotalAmountForDay(startMillis: Long, endMillis: Long): Flow<Int>
 
+    @Query(
+        """
+        SELECT COALESCE(SUM(amount_ml), 0)
+        FROM intake_records
+        WHERE timestamp >= :startMillis AND timestamp < :endMillis
+        """,
+    )
+    suspend fun getTotalAmountForDay(startMillis: Long, endMillis: Long): Int
+
     @Delete
     suspend fun delete(record: IntakeRecord)
 

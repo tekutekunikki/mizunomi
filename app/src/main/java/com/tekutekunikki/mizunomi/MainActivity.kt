@@ -1,6 +1,10 @@
 package com.tekutekunikki.mizunomi
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -87,6 +91,12 @@ private val WaterTeaDrinkTypes = setOf(
 )
 
 class MainActivity : ComponentActivity() {
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        HydrationReminderScheduler.scheduleDailyChecks(this)
+    }
+
     private val repository by lazy {
         IntakeRecordRepository(
             MizunomiDatabase.getInstance(this).intakeRecordDao(),
@@ -95,9 +105,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        HydrationReminderNotifications.createChannel(this)
+        HydrationReminderScheduler.scheduleDailyChecks(this)
+        requestNotificationPermissionIfNeeded()
         setContent {
             MizunomiApp(repository = repository)
         }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 }
 
