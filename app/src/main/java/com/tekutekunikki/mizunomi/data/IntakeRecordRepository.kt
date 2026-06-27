@@ -29,6 +29,11 @@ class IntakeRecordRepository(
         return dao.observeTotalAmountForDay(range.startMillis, range.endMillis)
     }
 
+    suspend fun getTotalAmountForDay(date: LocalDate): Int {
+        val range = date.toMillisRange(clock.zone)
+        return dao.getTotalAmountForDay(range.startMillis, range.endMillis)
+    }
+
     suspend fun addRecord(
         drinkType: String,
         amountMl: Int,

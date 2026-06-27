@@ -1,8 +1,11 @@
 package com.tekutekunikki.mizunomi
 
+import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
@@ -38,6 +41,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -98,34 +103,65 @@ private val WaterTeaDrinkTypes = setOf(
 )
 
 class MainActivity : ComponentActivity() {
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        HydrationReminderScheduler.scheduleDailyChecks(this)
+    }
+
     private val repository by lazy {
         IntakeRecordRepository(
             MizunomiDatabase.getInstance(this).intakeRecordDao(),
         )
     }
+    private val reminderSettingsRepository by lazy {
+        ReminderSettingsRepository(this)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        HydrationReminderNotifications.createChannel(this)
+        HydrationReminderScheduler.scheduleDailyChecks(this)
+        requestNotificationPermissionIfNeeded()
         setContent {
-            MizunomiApp(repository = repository)
+            MizunomiApp(
+                repository = repository,
+                reminderSettingsRepository = reminderSettingsRepository,
+            )
         }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 }
 
 @Composable
-fun MizunomiApp(repository: IntakeRecordRepository) {
+fun MizunomiApp(
+    repository: IntakeRecordRepository,
+    reminderSettingsRepository: ReminderSettingsRepository,
+) {
     val todayTotalMl by repository.observeTotalAmountForDay(LocalDate.now())
         .collectAsState(initial = 0)
     val todayRecords by repository.observeTodayRecords()
         .collectAsState(initial = emptyList())
     val weeklyRecords by repository.observeRecentRecords(WeeklyTrendDays)
         .collectAsState(initial = emptyList())
+    val reminderEnabled by reminderSettingsRepository.reminderEnabled
+        .collectAsState(initial = true)
     val scope = rememberCoroutineScope()
 
     MizunomiAppContent(
         todayTotalMl = todayTotalMl,
         todayRecords = todayRecords,
         weeklyRecords = weeklyRecords,
+        reminderEnabled = reminderEnabled,
         onAddRecord = { drinkType, amountMl ->
             scope.launch {
                 repository.addRecord(
@@ -149,6 +185,11 @@ fun MizunomiApp(repository: IntakeRecordRepository) {
                 repository.deleteRecord(record)
             }
         },
+        onReminderEnabledChange = { enabled ->
+            scope.launch {
+                reminderSettingsRepository.setReminderEnabled(enabled)
+            }
+        },
     )
 }
 
@@ -157,9 +198,11 @@ fun MizunomiAppContent(
     todayTotalMl: Int,
     todayRecords: List<IntakeRecord>,
     weeklyRecords: List<IntakeRecord>,
+    reminderEnabled: Boolean,
     onAddRecord: (drinkType: String, amountMl: Int) -> Unit,
     onUpdateRecord: (record: IntakeRecord, drinkType: String, amountMl: Int) -> Unit,
     onDeleteRecord: (record: IntakeRecord) -> Unit,
+    onReminderEnabledChange: (Boolean) -> Unit,
 ) {
     val drinkTypes = DrinkTypes
     val amounts = listOf(100, 200, 300, 500)
@@ -288,7 +331,11 @@ fun MizunomiAppContent(
                     onDelete = { deletingRecord = it },
                 )
 
-                AppTab.Settings -> SettingsTabContent(contentPadding = innerPadding)
+                AppTab.Settings -> SettingsTabContent(
+                    contentPadding = innerPadding,
+                    reminderEnabled = reminderEnabled,
+                    onReminderEnabledChange = onReminderEnabledChange,
+                )
             }
         }
     }
@@ -428,11 +475,18 @@ private fun HistoryTabContent(
 }
 
 @Composable
-private fun SettingsTabContent(contentPadding: PaddingValues) {
+private fun SettingsTabContent(
+    contentPadding: PaddingValues,
+    reminderEnabled: Boolean,
+    onReminderEnabledChange: (Boolean) -> Unit,
+) {
     MizunomiTabList(contentPadding = contentPadding) {
         item { TabHeader(title = "設定", subtitle = "自分に合う水分習慣へ") }
         item {
-            SettingsFoundationCard()
+            SettingsFoundationCard(
+                reminderEnabled = reminderEnabled,
+                onReminderEnabledChange = onReminderEnabledChange,
+            )
         }
     }
 }
@@ -491,7 +545,10 @@ private fun EmptyHistoryCard() {
 }
 
 @Composable
-private fun SettingsFoundationCard() {
+private fun SettingsFoundationCard(
+    reminderEnabled: Boolean,
+    onReminderEnabledChange: (Boolean) -> Unit,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
@@ -509,14 +566,59 @@ private fun SettingsFoundationCard() {
                 fontWeight = FontWeight.SemiBold,
             )
             SettingPreviewRow(label = "1日の目標", value = "2,000 ml")
-            SettingPreviewRow(label = "水分補給リマインド", value = "準備中")
-            SettingPreviewRow(label = "起床・就寝時刻", value = "準備中")
+            ReminderToggleRow(
+                enabled = reminderEnabled,
+                onEnabledChange = onReminderEnabledChange,
+            )
+            SettingPreviewRow(label = "起床時刻", value = "8:00")
+            SettingPreviewRow(label = "就寝時刻", value = "22:00")
             Text(
-                text = "音声入力は端末の音声認識機能を利用します。認識精度や通信の有無は端末環境に依存します。",
+                text = "音声入力について",
+                color = Color(0xFF25384A),
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "音声入力は端末の音声認識機能を利用します。\n認識精度や通信の有無は端末環境に依存します。",
                 color = Color(0xFF6C7A86),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+    }
+}
+
+@Composable
+private fun ReminderToggleRow(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = "水分補給リマインド",
+                color = Color(0xFF31485B),
+            )
+            Text(
+                text = if (enabled) "ON" else "OFF",
+                color = if (enabled) Color(0xFF116DAE) else Color(0xFF6C7A86),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = onEnabledChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF1683D8),
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = Color(0xFFB8C7D1),
+                uncheckedBorderColor = Color(0xFFB8C7D1),
+            ),
+        )
     }
 }
 
@@ -1551,8 +1653,10 @@ private fun MizunomiAppPreview() {
                 memo = null,
             ),
         ),
+        reminderEnabled = true,
         onAddRecord = { _, _ -> },
         onUpdateRecord = { _, _, _ -> },
         onDeleteRecord = {},
+        onReminderEnabledChange = {},
     )
 }
