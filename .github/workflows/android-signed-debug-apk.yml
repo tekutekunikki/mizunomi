@@ -1,0 +1,69 @@
+name: Android Signed Debug APK
+
+# テスト配布用に、固定署名された debug APK を生成するワークフロー。
+# 既存の "Android Debug APK" ワークフローはそのまま残し、こちらは手動実行（workflow_dispatch）専用にする。
+# 固定署名のおかげで、同じ端末に旧 APK が入っていても上書きアップデートできる。
+#
+# 必要な GitHub Secrets:
+#   MIZUNOMI_UPLOAD_KEYSTORE_BASE64   ... テスト配布用 keystore を base64 化した文字列
+#   MIZUNOMI_UPLOAD_KEYSTORE_PASSWORD ... keystore のパスワード
+#   MIZUNOMI_UPLOAD_KEY_ALIAS         ... 署名鍵のエイリアス
+#   MIZUNOMI_UPLOAD_KEY_PASSWORD      ... 署名鍵のパスワード
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore upload keystore
+        env:
+          MIZUNOMI_UPLOAD_KEYSTORE_BASE64: ${{ secrets.MIZUNOMI_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$MIZUNOMI_UPLOAD_KEYSTORE_BASE64" ]; then
+            echo "MIZUNOMI_UPLOAD_KEYSTORE_BASE64 secret is not set." >&2
+            echo "Configure the required secrets before running this workflow." >&2
+            exit 1
+          fi
+          echo "$MIZUNOMI_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload-keystore.jks"
+
+      - name: Build signed debug APK
+        env:
+          MIZUNOMI_UPLOAD_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
+          MIZUNOMI_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.MIZUNOMI_UPLOAD_KEYSTORE_PASSWORD }}
+          MIZUNOMI_UPLOAD_KEY_ALIAS: ${{ secrets.MIZUNOMI_UPLOAD_KEY_ALIAS }}
+          MIZUNOMI_UPLOAD_KEY_PASSWORD: ${{ secrets.MIZUNOMI_UPLOAD_KEY_PASSWORD }}
+        run: ./gradlew assembleDebug -PVERSION_CODE=${{ github.run_number }}
+
+      - name: Rename APK with versionCode
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            "dist/mizunomi-debug-v${{ github.run_number }}.apk"
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload-keystore.jks"
+
+      - name: Upload signed debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mizunomi-signed-debug-apk-v${{ github.run_number }}
+          path: dist/mizunomi-debug-v${{ github.run_number }}.apk
