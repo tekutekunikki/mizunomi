@@ -33,8 +33,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -164,6 +167,7 @@ fun MizunomiAppContent(
     var editingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     var deletingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     var voiceInputState by remember { mutableStateOf<VoiceInputState?>(null) }
+    var selectedTab by remember { mutableStateOf(AppTab.Home) }
     val voiceInputLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -233,106 +237,305 @@ fun MizunomiAppContent(
             )
         }
 
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFFF4F8FB)),
-            color = Color(0xFFF4F8FB),
-        ) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp, vertical = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                item {
-                    Text(
-                        text = "mizunomi",
-                        color = Color(0xFF13314B),
-                        fontSize = 30.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color(0xFFF4F8FB),
+            bottomBar = {
+                MizunomiBottomBar(
+                    selectedTab = selectedTab,
+                    onTabSelected = { selectedTab = it },
+                )
+            },
+        ) { innerPadding ->
+            when (selectedTab) {
+                AppTab.Home -> HomeTabContent(
+                    contentPadding = innerPadding,
+                    todayTotalMl = todayTotalMl,
+                    remainingMl = remainingMl,
+                    progress = progress,
+                    progressPercent = progressPercent,
+                    isGoalAchieved = isGoalAchieved,
+                    paceStatus = paceStatus,
+                    drinkNotices = drinkNotices,
+                )
 
-                item {
-                    SummaryCard(
-                        todayTotalMl = todayTotalMl,
-                        remainingMl = remainingMl,
-                        progress = progress,
-                        progressPercent = progressPercent,
-                        isGoalAchieved = isGoalAchieved,
-                    )
-                }
+                AppTab.Record -> RecordTabContent(
+                    contentPadding = innerPadding,
+                    drinkTypes = drinkTypes,
+                    amounts = amounts,
+                    selectedDrinkType = selectedDrinkType,
+                    onDrinkTypeSelected = { selectedDrinkType = it },
+                    onQuickAdd = { amountMl -> onAddRecord(selectedDrinkType, amountMl) },
+                    onVoiceInput = {
+                        try {
+                            voiceInputLauncher.launch(buildVoiceRecognitionIntent())
+                        } catch (exception: ActivityNotFoundException) {
+                            voiceInputState = VoiceInputState(
+                                rawText = null,
+                                candidate = null,
+                                errorMessage = "\u7AEF\u672B\u306E\u97F3\u58F0\u5165\u529B\u3092\u8D77\u52D5\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
+                            )
+                        }
+                    },
+                )
 
-                item {
-                    PaceStatusCard(status = paceStatus)
-                }
+                AppTab.History -> HistoryTabContent(
+                    contentPadding = innerPadding,
+                    weeklyTrend = weeklyTrend,
+                    drinkSummaries = drinkSummaries,
+                    todayRecords = todayRecords,
+                    onEdit = { editingRecord = it },
+                    onDelete = { deletingRecord = it },
+                )
 
-                if (drinkNotices.isNotEmpty()) {
-                    item {
-                        DrinkNoticeCard(notices = drinkNotices)
-                    }
-                }
-
-                item {
-                    AddIntakeCard(
-                        drinkTypes = drinkTypes,
-                        amounts = amounts,
-                        selectedDrinkType = selectedDrinkType,
-                        onDrinkTypeSelected = { selectedDrinkType = it },
-                        onQuickAdd = { amountMl -> onAddRecord(selectedDrinkType, amountMl) },
-                        onVoiceInput = {
-                            try {
-                                voiceInputLauncher.launch(buildVoiceRecognitionIntent())
-                            } catch (exception: ActivityNotFoundException) {
-                                voiceInputState = VoiceInputState(
-                                    rawText = null,
-                                    candidate = null,
-                                    errorMessage = "\u7AEF\u672B\u306E\u97F3\u58F0\u5165\u529B\u3092\u8D77\u52D5\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
-                                )
-                            }
-                        },
-                    )
-                }
-
-                item {
-                    WeeklyTrendCard(days = weeklyTrend)
-                }
-
-                if (drinkSummaries.isNotEmpty()) {
-                    item {
-                        TypeSummaryCard(summaries = drinkSummaries)
-                    }
-                }
-
-                item {
-                    Text(
-                        text = "Recent records",
-                        color = Color(0xFF25384A),
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-
-                if (todayRecords.isEmpty()) {
-                    item {
-                        Text(
-                            text = "No records yet.",
-                            color = Color(0xFF6C7A86),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                } else {
-                    items(todayRecords.take(6), key = { it.id }) { record ->
-                        IntakeRecordRow(
-                            record = record,
-                            onEdit = { editingRecord = it },
-                            onDelete = { deletingRecord = it },
-                        )
-                    }
-                }
+                AppTab.Settings -> SettingsTabContent(contentPadding = innerPadding)
             }
         }
+    }
+}
+
+@Composable
+private fun MizunomiBottomBar(
+    selectedTab: AppTab,
+    onTabSelected: (AppTab) -> Unit,
+) {
+    NavigationBar(
+        containerColor = Color.White,
+        tonalElevation = 0.dp,
+    ) {
+        AppTab.entries.forEach { tab ->
+            val selected = selectedTab == tab
+            NavigationBarItem(
+                selected = selected,
+                onClick = { onTabSelected(tab) },
+                icon = {
+                    Text(
+                        text = tab.symbol,
+                        fontSize = 20.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    )
+                },
+                label = {
+                    Text(
+                        text = tab.label,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                    )
+                },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = Color(0xFF116DAE),
+                    selectedTextColor = Color(0xFF116DAE),
+                    indicatorColor = Color(0xFFE3F3FF),
+                    unselectedIconColor = Color(0xFF6C7A86),
+                    unselectedTextColor = Color(0xFF6C7A86),
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeTabContent(
+    contentPadding: PaddingValues,
+    todayTotalMl: Int,
+    remainingMl: Int,
+    progress: Float,
+    progressPercent: Int,
+    isGoalAchieved: Boolean,
+    paceStatus: PaceStatus,
+    drinkNotices: List<DrinkNotice>,
+) {
+    MizunomiTabList(contentPadding = contentPadding) {
+        item { TabHeader(title = "mizunomi", subtitle = "今日の水分バランス") }
+        item {
+            SummaryCard(
+                todayTotalMl = todayTotalMl,
+                remainingMl = remainingMl,
+                progress = progress,
+                progressPercent = progressPercent,
+                isGoalAchieved = isGoalAchieved,
+            )
+        }
+        item { PaceStatusCard(status = paceStatus) }
+        if (drinkNotices.isNotEmpty()) {
+            item { DrinkNoticeCard(notices = drinkNotices) }
+        }
+    }
+}
+
+@Composable
+private fun RecordTabContent(
+    contentPadding: PaddingValues,
+    drinkTypes: List<String>,
+    amounts: List<Int>,
+    selectedDrinkType: String,
+    onDrinkTypeSelected: (String) -> Unit,
+    onQuickAdd: (Int) -> Unit,
+    onVoiceInput: () -> Unit,
+) {
+    MizunomiTabList(contentPadding = contentPadding) {
+        item { TabHeader(title = "記録", subtitle = "飲んだ分をすぐ追加") }
+        item {
+            AddIntakeCard(
+                drinkTypes = drinkTypes,
+                amounts = amounts,
+                selectedDrinkType = selectedDrinkType,
+                onDrinkTypeSelected = onDrinkTypeSelected,
+                onQuickAdd = onQuickAdd,
+                onVoiceInput = onVoiceInput,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryTabContent(
+    contentPadding: PaddingValues,
+    weeklyTrend: List<DailyIntake>,
+    drinkSummaries: List<DrinkSummary>,
+    todayRecords: List<IntakeRecord>,
+    onEdit: (IntakeRecord) -> Unit,
+    onDelete: (IntakeRecord) -> Unit,
+) {
+    MizunomiTabList(contentPadding = contentPadding) {
+        item { TabHeader(title = "履歴", subtitle = "最近の記録と7日間の変化") }
+        item { WeeklyTrendCard(days = weeklyTrend) }
+        if (drinkSummaries.isNotEmpty()) {
+            item { TypeSummaryCard(summaries = drinkSummaries) }
+        }
+        item {
+            Text(
+                text = "Recent records",
+                color = Color(0xFF25384A),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        if (todayRecords.isEmpty()) {
+            item {
+                EmptyHistoryCard()
+            }
+        } else {
+            items(todayRecords.take(6), key = { it.id }) { record ->
+                IntakeRecordRow(
+                    record = record,
+                    onEdit = onEdit,
+                    onDelete = onDelete,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsTabContent(contentPadding: PaddingValues) {
+    MizunomiTabList(contentPadding = contentPadding) {
+        item { TabHeader(title = "設定", subtitle = "自分に合う水分習慣へ") }
+        item {
+            SettingsFoundationCard()
+        }
+    }
+}
+
+@Composable
+private fun MizunomiTabList(
+    contentPadding: PaddingValues,
+    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF4F8FB))
+            .padding(contentPadding),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        content = content,
+    )
+}
+
+@Composable
+private fun TabHeader(
+    title: String,
+    subtitle: String,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = title,
+            color = Color(0xFF13314B),
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = subtitle,
+            color = Color(0xFF6C7A86),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
+private fun EmptyHistoryCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Text(
+            text = "まだ記録がありません。記録タブから最初の一杯を追加しましょう。",
+            modifier = Modifier.padding(18.dp),
+            color = Color(0xFF6C7A86),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
+private fun SettingsFoundationCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "基本設定",
+                color = Color(0xFF25384A),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            SettingPreviewRow(label = "1日の目標", value = "2,000 ml")
+            SettingPreviewRow(label = "水分補給リマインド", value = "準備中")
+            SettingPreviewRow(label = "起床・就寝時刻", value = "準備中")
+            Text(
+                text = "音声入力は端末の音声認識機能を利用します。認識精度や通信の有無は端末環境に依存します。",
+                color = Color(0xFF6C7A86),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingPreviewRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = label, color = Color(0xFF31485B))
+        Text(
+            text = value,
+            color = Color(0xFF116DAE),
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
@@ -350,13 +553,13 @@ private fun VoiceIntakeDialog(
     var selectedDrinkType by remember(state.rawText, state.errorMessage) {
         mutableStateOf(state.candidate?.drinkType ?: drinkTypes.first())
     }
+    val correctionAmounts = remember(state.candidate?.amountMl, amounts) {
+        (listOfNotNull(state.candidate?.amountMl) + amounts)
+            .distinct()
+            .sorted()
+    }
     var selectedAmountMl by remember(state.rawText, state.errorMessage) {
-        mutableStateOf(
-            state.candidate
-                ?.amountMl
-                ?.takeIf { it in amounts }
-                ?: amounts.first(),
-        )
+        mutableStateOf(state.candidate?.amountMl ?: amounts.first())
     }
 
     AlertDialog(
@@ -398,7 +601,7 @@ private fun VoiceIntakeDialog(
                         onSelected = { selectedDrinkType = it },
                     )
                     AmountSelectionGrid(
-                        amounts = amounts,
+                        amounts = correctionAmounts,
                         selectedAmountMl = selectedAmountMl,
                         onSelected = { selectedAmountMl = it },
                     )
@@ -1279,6 +1482,16 @@ private data class VoiceIntakeCandidate(
     val amountMl: Int,
     val rawText: String,
 )
+
+private enum class AppTab(
+    val label: String,
+    val symbol: String,
+) {
+    Home(label = "ホーム", symbol = "⌂"),
+    Record(label = "記録", symbol = "+"),
+    History(label = "履歴", symbol = "≡"),
+    Settings(label = "設定", symbol = "⚙"),
+}
 
 private data class DailyIntake(
     val date: LocalDate,
