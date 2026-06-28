@@ -2,4 +2,11 @@
 build/
 local.properties
 
+# Signing material must only be restored from local/GitHub secret storage.
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+
 **/build/

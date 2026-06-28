@@ -5,6 +5,30 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val testKeystoreFile = providers.environmentVariable("MIZUNOMI_UPLOAD_KEYSTORE_FILE").orNull
+val testKeystorePassword = providers.environmentVariable("MIZUNOMI_UPLOAD_KEYSTORE_PASSWORD").orNull
+val testKeyAlias = providers.environmentVariable("MIZUNOMI_UPLOAD_KEY_ALIAS").orNull
+val testKeyPassword = providers.environmentVariable("MIZUNOMI_UPLOAD_KEY_PASSWORD").orNull
+val testSigningValues = listOf(
+    testKeystoreFile,
+    testKeystorePassword,
+    testKeyAlias,
+    testKeyPassword,
+)
+val hasAnyTestSigningValue = testSigningValues.any { !it.isNullOrBlank() }
+val hasCompleteTestSigningConfig = testSigningValues.all { !it.isNullOrBlank() }
+
+check(!hasAnyTestSigningValue || hasCompleteTestSigningConfig) {
+    "Test APK signing requires all MIZUNOMI_UPLOAD_KEYSTORE_* environment variables."
+}
+
+val requestedVersionCode = providers.environmentVariable("MIZUNOMI_VERSION_CODE").orNull
+val resolvedVersionCode = requestedVersionCode?.toIntOrNull()?.takeIf { it > 0 } ?: 1
+
+check(requestedVersionCode == null || resolvedVersionCode.toString() == requestedVersionCode) {
+    "MIZUNOMI_VERSION_CODE must be a positive integer."
+}
+
 android {
     namespace = "com.tekutekunikki.mizunomi"
     compileSdk = 35
@@ -13,8 +37,27 @@ android {
         applicationId = "com.tekutekunikki.mizunomi"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
+        versionCode = resolvedVersionCode
         versionName = "1.0"
+    }
+
+    signingConfigs {
+        if (hasCompleteTestSigningConfig) {
+            create("testDistribution") {
+                storeFile = file(testKeystoreFile!!)
+                storePassword = testKeystorePassword
+                keyAlias = testKeyAlias
+                keyPassword = testKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            if (hasCompleteTestSigningConfig) {
+                signingConfig = signingConfigs.getByName("testDistribution")
+            }
+        }
     }
 
     compileOptions {

@@ -1,0 +1,89 @@
+name: Android Signed Debug APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-signed-debug:
+    runs-on: ubuntu-latest
+    env:
+      MIZUNOMI_UPLOAD_KEYSTORE_BASE64: ${{ secrets.MIZUNOMI_UPLOAD_KEYSTORE_BASE64 }}
+      MIZUNOMI_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.MIZUNOMI_UPLOAD_KEYSTORE_PASSWORD }}
+      MIZUNOMI_UPLOAD_KEY_ALIAS: ${{ secrets.MIZUNOMI_UPLOAD_KEY_ALIAS }}
+      MIZUNOMI_UPLOAD_KEY_PASSWORD: ${{ secrets.MIZUNOMI_UPLOAD_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate signing secrets
+        shell: bash
+        run: |
+          missing=0
+          for secret_name in \
+            MIZUNOMI_UPLOAD_KEYSTORE_BASE64 \
+            MIZUNOMI_UPLOAD_KEYSTORE_PASSWORD \
+            MIZUNOMI_UPLOAD_KEY_ALIAS \
+            MIZUNOMI_UPLOAD_KEY_PASSWORD
+          do
+            if [ -z "${!secret_name}" ]; then
+              echo "::error::Missing required repository secret: ${secret_name}"
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
+      - name: Restore signing keystore and version
+        shell: bash
+        run: |
+          keystore_path="${RUNNER_TEMP}/mizunomi-test-upload.jks"
+          printf '%s' "${MIZUNOMI_UPLOAD_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+          echo "MIZUNOMI_UPLOAD_KEYSTORE_FILE=${keystore_path}" >> "${GITHUB_ENV}"
+          echo "MIZUNOMI_VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))" >> "${GITHUB_ENV}"
+
+      - name: Build fixed-signature debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Name test APK
+        shell: bash
+        run: |
+          output="app/build/outputs/apk/debug/mizunomi-test-vc${MIZUNOMI_VERSION_CODE}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "${output}"
+          echo "SIGNED_APK_PATH=${output}" >> "${GITHUB_ENV}"
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          apksigner_path="$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          if [ -z "${apksigner_path}" ]; then
+            echo "::error::apksigner was not found in the Android SDK"
+            exit 1
+          fi
+          "${apksigner_path}" verify --verbose --print-certs "${SIGNED_APK_PATH}"
+          {
+            echo "### Signed test APK"
+            echo "- versionCode: ${MIZUNOMI_VERSION_CODE}"
+            echo "- file: $(basename "${SIGNED_APK_PATH}")"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload signed debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mizunomi-signed-debug-${{ github.run_number }}
+          path: ${{ env.SIGNED_APK_PATH }}
+          retention-days: 30
