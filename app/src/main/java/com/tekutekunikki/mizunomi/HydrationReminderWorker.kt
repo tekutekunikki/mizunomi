@@ -7,6 +7,7 @@ import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
 import com.tekutekunikki.mizunomi.data.MizunomiDatabase
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 class HydrationReminderWorker(
@@ -20,7 +21,7 @@ class HydrationReminderWorker(
         }
 
         val now = LocalDateTime.now()
-        if (now.hour != checkHour) {
+        if (!isWithinCheckWindow(checkHour, now.toLocalTime())) {
             return Result.success()
         }
 
@@ -63,6 +64,17 @@ class HydrationReminderWorker(
 
     private fun notificationKey(date: LocalDate, checkHour: Int): String =
         "${date.format(DateTimeFormatter.BASIC_ISO_DATE)}-$checkHour"
+
+    private fun isWithinCheckWindow(checkHour: Int, currentTime: LocalTime): Boolean {
+        val windowStart = LocalTime.of(checkHour, 0)
+        val nextCheckHour = expectedMlByCheckHour.keys
+            .filter { it > checkHour }
+            .minOrNull()
+        val windowEnd = nextCheckHour?.let { LocalTime.of(it, 0) }
+
+        return !currentTime.isBefore(windowStart) &&
+            (windowEnd == null || currentTime.isBefore(windowEnd))
+    }
 
     private fun preferences() =
         applicationContext.getSharedPreferences("hydration_reminders", Context.MODE_PRIVATE)
