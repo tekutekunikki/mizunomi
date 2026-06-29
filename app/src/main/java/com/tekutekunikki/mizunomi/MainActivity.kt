@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import com.tekutekunikki.mizunomi.data.IntakeRecord
 import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
 import com.tekutekunikki.mizunomi.data.MizunomiDatabase
+import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -77,6 +78,12 @@ private const val WeeklyTrendDays = 7L
 private const val SweetDrinkWarningThresholdMl = 500
 private const val BalancedDrinkTotalThresholdMl = 1000
 private const val WaterTeaMinimumThresholdMl = 500
+
+private data class RecordFeedback(
+    val drinkType: String,
+    val amountMl: Int,
+    val todayTotalMl: Int,
+)
 
 private val DrinkTypes = listOf(
     "\u6C34",
@@ -162,12 +169,13 @@ fun MizunomiApp(
         todayRecords = todayRecords,
         weeklyRecords = weeklyRecords,
         reminderEnabled = reminderEnabled,
-        onAddRecord = { drinkType, amountMl ->
+        onAddRecord = { drinkType, amountMl, onSaved ->
             scope.launch {
                 repository.addRecord(
                     drinkType = drinkType,
                     amountMl = amountMl,
                 )
+                onSaved(repository.getTotalAmountForDay(LocalDate.now()))
             }
         },
         onUpdateRecord = { record, drinkType, amountMl ->
@@ -199,7 +207,11 @@ fun MizunomiAppContent(
     todayRecords: List<IntakeRecord>,
     weeklyRecords: List<IntakeRecord>,
     reminderEnabled: Boolean,
-    onAddRecord: (drinkType: String, amountMl: Int) -> Unit,
+    onAddRecord: (
+        drinkType: String,
+        amountMl: Int,
+        onSaved: (todayTotalMl: Int) -> Unit,
+    ) -> Unit,
     onUpdateRecord: (record: IntakeRecord, drinkType: String, amountMl: Int) -> Unit,
     onDeleteRecord: (record: IntakeRecord) -> Unit,
     onReminderEnabledChange: (Boolean) -> Unit,
@@ -210,7 +222,17 @@ fun MizunomiAppContent(
     var editingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     var deletingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     var voiceInputState by remember { mutableStateOf<VoiceInputState?>(null) }
+    var recordFeedback by remember { mutableStateOf<RecordFeedback?>(null) }
     var selectedTab by remember { mutableStateOf(AppTab.Home) }
+    val addRecordWithFeedback = { drinkType: String, amountMl: Int ->
+        onAddRecord(drinkType, amountMl) { updatedTotalMl ->
+            recordFeedback = RecordFeedback(
+                drinkType = drinkType,
+                amountMl = amountMl,
+                todayTotalMl = updatedTotalMl,
+            )
+        }
+    }
     val voiceInputLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -273,7 +295,7 @@ fun MizunomiAppContent(
                 amounts = amounts,
                 onDismiss = { voiceInputState = null },
                 onSave = { drinkType, amountMl ->
-                    onAddRecord(drinkType, amountMl)
+                    addRecordWithFeedback(drinkType, amountMl)
                     selectedDrinkType = drinkType
                     voiceInputState = null
                 },
@@ -308,7 +330,10 @@ fun MizunomiAppContent(
                     amounts = amounts,
                     selectedDrinkType = selectedDrinkType,
                     onDrinkTypeSelected = { selectedDrinkType = it },
-                    onQuickAdd = { amountMl -> onAddRecord(selectedDrinkType, amountMl) },
+                    feedback = recordFeedback,
+                    onQuickAdd = { amountMl ->
+                        addRecordWithFeedback(selectedDrinkType, amountMl)
+                    },
                     onVoiceInput = {
                         try {
                             voiceInputLauncher.launch(buildVoiceRecognitionIntent())
@@ -417,6 +442,7 @@ private fun RecordTabContent(
     amounts: List<Int>,
     selectedDrinkType: String,
     onDrinkTypeSelected: (String) -> Unit,
+    feedback: RecordFeedback?,
     onQuickAdd: (Int) -> Unit,
     onVoiceInput: () -> Unit,
 ) {
@@ -431,6 +457,67 @@ private fun RecordTabContent(
                 onQuickAdd = onQuickAdd,
                 onVoiceInput = onVoiceInput,
             )
+        }
+        feedback?.let { savedRecord ->
+            item { RecordFeedbackCard(feedback = savedRecord) }
+        }
+    }
+}
+
+@Composable
+private fun RecordFeedbackCard(feedback: RecordFeedback) {
+    val goalAchieved = feedback.todayTotalMl >= DailyGoalMl
+    val remainingMl = (DailyGoalMl - feedback.todayTotalMl).coerceAtLeast(0)
+    val numberFormat = remember { NumberFormat.getNumberInstance(Locale.JAPAN) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (goalAchieved) Color(0xFFDCF6E6) else Color(0xFFE7F6ED),
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Text(
+                text = if (goalAchieved) {
+                    "✓ 今日の目標を達成しました！"
+                } else {
+                    "✓ 記録しました"
+                },
+                color = Color(0xFF168344),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = buildString {
+                    append(feedback.drinkType)
+                    append(" ")
+                    append(numberFormat.format(feedback.amountMl))
+                    append("ml")
+                    if (goalAchieved) append(" を記録しました")
+                },
+                color = Color(0xFF173B2A),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "今日の合計 ${numberFormat.format(feedback.todayTotalMl)}ml / " +
+                    "${numberFormat.format(DailyGoalMl)}ml",
+                color = Color(0xFF315C47),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (!goalAchieved) {
+                Text(
+                    text = "あと ${numberFormat.format(remainingMl)}ml",
+                    color = Color(0xFF315C47),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
         }
     }
 }
@@ -1654,7 +1741,7 @@ private fun MizunomiAppPreview() {
             ),
         ),
         reminderEnabled = true,
-        onAddRecord = { _, _ -> },
+        onAddRecord = { _, amountMl, onSaved -> onSaved(400 + amountMl) },
         onUpdateRecord = { _, _, _ -> },
         onDeleteRecord = {},
         onReminderEnabledChange = {},
