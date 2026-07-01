@@ -34,6 +34,15 @@ interface IntakeRecordDao {
 
     @Query(
         """
+        SELECT *
+        FROM intake_records
+        ORDER BY timestamp ASC
+        """,
+    )
+    suspend fun getAllRecords(): List<IntakeRecord>
+
+    @Query(
+        """
         SELECT COALESCE(SUM(amount_ml), 0)
         FROM intake_records
         WHERE timestamp >= :startMillis AND timestamp < :endMillis

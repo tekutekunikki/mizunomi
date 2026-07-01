@@ -34,6 +34,8 @@ class IntakeRecordRepository(
         return dao.getTotalAmountForDay(range.startMillis, range.endMillis)
     }
 
+    suspend fun getAllRecords(): List<IntakeRecord> = dao.getAllRecords()
+
     suspend fun addRecord(
         drinkType: String,
         amountMl: Int,
