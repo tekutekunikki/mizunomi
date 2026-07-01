@@ -13,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,6 +41,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -73,7 +75,6 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.launch
 
-private const val DailyGoalMl = 2000
 private const val WeeklyTrendDays = 7L
 private const val SweetDrinkWarningThresholdMl = 500
 private const val BalancedDrinkTotalThresholdMl = 1000
@@ -162,6 +163,8 @@ fun MizunomiApp(
         .collectAsState(initial = emptyList())
     val reminderEnabled by reminderSettingsRepository.reminderEnabled
         .collectAsState(initial = true)
+    val dailyGoalMl by reminderSettingsRepository.dailyGoalMl
+        .collectAsState(initial = DefaultDailyGoalMl)
     val scope = rememberCoroutineScope()
 
     MizunomiAppContent(
@@ -169,6 +172,7 @@ fun MizunomiApp(
         todayRecords = todayRecords,
         weeklyRecords = weeklyRecords,
         reminderEnabled = reminderEnabled,
+        dailyGoalMl = dailyGoalMl,
         onAddRecord = { drinkType, amountMl, onSaved ->
             scope.launch {
                 repository.addRecord(
@@ -198,6 +202,11 @@ fun MizunomiApp(
                 reminderSettingsRepository.setReminderEnabled(enabled)
             }
         },
+        onDailyGoalChange = { dailyGoalMl ->
+            scope.launch {
+                reminderSettingsRepository.setDailyGoalMl(dailyGoalMl)
+            }
+        },
     )
 }
 
@@ -207,6 +216,7 @@ fun MizunomiAppContent(
     todayRecords: List<IntakeRecord>,
     weeklyRecords: List<IntakeRecord>,
     reminderEnabled: Boolean,
+    dailyGoalMl: Int,
     onAddRecord: (
         drinkType: String,
         amountMl: Int,
@@ -215,6 +225,7 @@ fun MizunomiAppContent(
     onUpdateRecord: (record: IntakeRecord, drinkType: String, amountMl: Int) -> Unit,
     onDeleteRecord: (record: IntakeRecord) -> Unit,
     onReminderEnabledChange: (Boolean) -> Unit,
+    onDailyGoalChange: (Int) -> Unit,
 ) {
     val drinkTypes = DrinkTypes
     val amounts = listOf(100, 200, 300, 500)
@@ -243,11 +254,11 @@ fun MizunomiAppContent(
             voiceInputState = buildVoiceInputState(recognizedText)
         }
     }
-    val remainingMl = (DailyGoalMl - todayTotalMl).coerceAtLeast(0)
-    val progress = (todayTotalMl.toFloat() / DailyGoalMl).coerceIn(0f, 1f)
+    val remainingMl = (dailyGoalMl - todayTotalMl).coerceAtLeast(0)
+    val progress = (todayTotalMl.toFloat() / dailyGoalMl).coerceIn(0f, 1f)
     val progressPercent = (progress * 100).toInt()
-    val isGoalAchieved = todayTotalMl >= DailyGoalMl
-    val paceStatus = buildPaceStatus(todayTotalMl, LocalTime.now())
+    val isGoalAchieved = todayTotalMl >= dailyGoalMl
+    val paceStatus = buildPaceStatus(todayTotalMl, LocalTime.now(), dailyGoalMl)
     val weeklyTrend = remember(weeklyRecords) {
         buildWeeklyTrend(weeklyRecords)
     }
@@ -320,6 +331,7 @@ fun MizunomiAppContent(
                     progress = progress,
                     progressPercent = progressPercent,
                     isGoalAchieved = isGoalAchieved,
+                    dailyGoalMl = dailyGoalMl,
                     paceStatus = paceStatus,
                     drinkNotices = drinkNotices,
                 )
@@ -331,6 +343,7 @@ fun MizunomiAppContent(
                     selectedDrinkType = selectedDrinkType,
                     onDrinkTypeSelected = { selectedDrinkType = it },
                     feedback = recordFeedback,
+                    dailyGoalMl = dailyGoalMl,
                     onQuickAdd = { amountMl ->
                         addRecordWithFeedback(selectedDrinkType, amountMl)
                     },
@@ -350,6 +363,7 @@ fun MizunomiAppContent(
                 AppTab.History -> HistoryTabContent(
                     contentPadding = innerPadding,
                     weeklyTrend = weeklyTrend,
+                    dailyGoalMl = dailyGoalMl,
                     drinkSummaries = drinkSummaries,
                     todayRecords = todayRecords,
                     onEdit = { editingRecord = it },
@@ -359,7 +373,9 @@ fun MizunomiAppContent(
                 AppTab.Settings -> SettingsTabContent(
                     contentPadding = innerPadding,
                     reminderEnabled = reminderEnabled,
+                    dailyGoalMl = dailyGoalMl,
                     onReminderEnabledChange = onReminderEnabledChange,
+                    onDailyGoalChange = onDailyGoalChange,
                 )
             }
         }
@@ -414,6 +430,7 @@ private fun HomeTabContent(
     progress: Float,
     progressPercent: Int,
     isGoalAchieved: Boolean,
+    dailyGoalMl: Int,
     paceStatus: PaceStatus,
     drinkNotices: List<DrinkNotice>,
 ) {
@@ -426,6 +443,7 @@ private fun HomeTabContent(
                 progress = progress,
                 progressPercent = progressPercent,
                 isGoalAchieved = isGoalAchieved,
+                dailyGoalMl = dailyGoalMl,
             )
         }
         item { PaceStatusCard(status = paceStatus) }
@@ -443,6 +461,7 @@ private fun RecordTabContent(
     selectedDrinkType: String,
     onDrinkTypeSelected: (String) -> Unit,
     feedback: RecordFeedback?,
+    dailyGoalMl: Int,
     onQuickAdd: (Int) -> Unit,
     onVoiceInput: () -> Unit,
 ) {
@@ -459,15 +478,18 @@ private fun RecordTabContent(
             )
         }
         feedback?.let { savedRecord ->
-            item { RecordFeedbackCard(feedback = savedRecord) }
+            item { RecordFeedbackCard(feedback = savedRecord, dailyGoalMl = dailyGoalMl) }
         }
     }
 }
 
 @Composable
-private fun RecordFeedbackCard(feedback: RecordFeedback) {
-    val goalAchieved = feedback.todayTotalMl >= DailyGoalMl
-    val remainingMl = (DailyGoalMl - feedback.todayTotalMl).coerceAtLeast(0)
+private fun RecordFeedbackCard(
+    feedback: RecordFeedback,
+    dailyGoalMl: Int,
+) {
+    val goalAchieved = feedback.todayTotalMl >= dailyGoalMl
+    val remainingMl = (dailyGoalMl - feedback.todayTotalMl).coerceAtLeast(0)
     val numberFormat = remember { NumberFormat.getNumberInstance(Locale.JAPAN) }
 
     Card(
@@ -506,7 +528,7 @@ private fun RecordFeedbackCard(feedback: RecordFeedback) {
             )
             Text(
                 text = "今日の合計 ${numberFormat.format(feedback.todayTotalMl)}ml / " +
-                    "${numberFormat.format(DailyGoalMl)}ml",
+                    "${numberFormat.format(dailyGoalMl)}ml",
                 color = Color(0xFF315C47),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -526,6 +548,7 @@ private fun RecordFeedbackCard(feedback: RecordFeedback) {
 private fun HistoryTabContent(
     contentPadding: PaddingValues,
     weeklyTrend: List<DailyIntake>,
+    dailyGoalMl: Int,
     drinkSummaries: List<DrinkSummary>,
     todayRecords: List<IntakeRecord>,
     onEdit: (IntakeRecord) -> Unit,
@@ -533,7 +556,7 @@ private fun HistoryTabContent(
 ) {
     MizunomiTabList(contentPadding = contentPadding) {
         item { TabHeader(title = "履歴", subtitle = "最近の記録と7日間の変化") }
-        item { WeeklyTrendCard(days = weeklyTrend) }
+        item { WeeklyTrendCard(days = weeklyTrend, dailyGoalMl = dailyGoalMl) }
         if (drinkSummaries.isNotEmpty()) {
             item { TypeSummaryCard(summaries = drinkSummaries) }
         }
@@ -565,14 +588,31 @@ private fun HistoryTabContent(
 private fun SettingsTabContent(
     contentPadding: PaddingValues,
     reminderEnabled: Boolean,
+    dailyGoalMl: Int,
     onReminderEnabledChange: (Boolean) -> Unit,
+    onDailyGoalChange: (Int) -> Unit,
 ) {
+    var showDailyGoalDialog by remember { mutableStateOf(false) }
+
+    if (showDailyGoalDialog) {
+        DailyGoalSelectionDialog(
+            selectedGoalMl = dailyGoalMl,
+            onDismiss = { showDailyGoalDialog = false },
+            onSelect = { selectedGoalMl ->
+                onDailyGoalChange(selectedGoalMl)
+                showDailyGoalDialog = false
+            },
+        )
+    }
+
     MizunomiTabList(contentPadding = contentPadding) {
         item { TabHeader(title = "設定", subtitle = "自分に合う水分習慣へ") }
         item {
             SettingsFoundationCard(
                 reminderEnabled = reminderEnabled,
+                dailyGoalMl = dailyGoalMl,
                 onReminderEnabledChange = onReminderEnabledChange,
+                onDailyGoalClick = { showDailyGoalDialog = true },
             )
         }
     }
@@ -634,7 +674,9 @@ private fun EmptyHistoryCard() {
 @Composable
 private fun SettingsFoundationCard(
     reminderEnabled: Boolean,
+    dailyGoalMl: Int,
     onReminderEnabledChange: (Boolean) -> Unit,
+    onDailyGoalClick: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -652,7 +694,10 @@ private fun SettingsFoundationCard(
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
-            SettingPreviewRow(label = "1日の目標", value = "2,000 ml")
+            DailyGoalSettingRow(
+                dailyGoalMl = dailyGoalMl,
+                onClick = onDailyGoalClick,
+            )
             ReminderToggleRow(
                 enabled = reminderEnabled,
                 onEnabledChange = onReminderEnabledChange,
@@ -671,6 +716,93 @@ private fun SettingsFoundationCard(
             )
         }
     }
+}
+
+@Composable
+private fun DailyGoalSettingRow(
+    dailyGoalMl: Int,
+    onClick: () -> Unit,
+) {
+    val numberFormat = remember { NumberFormat.getNumberInstance(Locale.JAPAN) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = "1日の目標水分量",
+                color = Color(0xFF31485B),
+            )
+            Text(
+                text = "タップして変更",
+                color = Color(0xFF6C7A86),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Text(
+            text = "${numberFormat.format(dailyGoalMl)} ml  ›",
+            color = Color(0xFF116DAE),
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun DailyGoalSelectionDialog(
+    selectedGoalMl: Int,
+    onDismiss: () -> Unit,
+    onSelect: (Int) -> Unit,
+) {
+    val numberFormat = remember { NumberFormat.getNumberInstance(Locale.JAPAN) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "1日の目標水分量") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "毎日の目標を選んでください。",
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    color = Color(0xFF6C7A86),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                DailyGoalOptionsMl.forEach { goalMl ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(goalMl) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = goalMl == selectedGoalMl,
+                            onClick = { onSelect(goalMl) },
+                        )
+                        Text(
+                            text = "${numberFormat.format(goalMl)} ml",
+                            modifier = Modifier.padding(start = 8.dp),
+                            color = Color(0xFF25384A),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = "キャンセル")
+            }
+        },
+    )
 }
 
 @Composable
@@ -1024,7 +1156,9 @@ private fun SummaryCard(
     progress: Float,
     progressPercent: Int,
     isGoalAchieved: Boolean,
+    dailyGoalMl: Int,
 ) {
+    val numberFormat = remember { NumberFormat.getNumberInstance(Locale.JAPAN) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
@@ -1064,7 +1198,10 @@ private fun SummaryCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(text = "Goal 2,000 ml", color = Color(0xFF6C7A86))
+                Text(
+                    text = "Goal ${numberFormat.format(dailyGoalMl)} ml",
+                    color = Color(0xFF6C7A86),
+                )
                 Text(text = "$progressPercent%", color = Color(0xFF0F6FAE), fontWeight = FontWeight.SemiBold)
             }
             Text(
@@ -1115,8 +1252,11 @@ private fun AchievementBadge() {
 }
 
 @Composable
-private fun WeeklyTrendCard(days: List<DailyIntake>) {
-    val maxBarAmount = maxOf(DailyGoalMl, days.maxOfOrNull { it.amountMl } ?: 0)
+private fun WeeklyTrendCard(
+    days: List<DailyIntake>,
+    dailyGoalMl: Int,
+) {
+    val maxBarAmount = maxOf(dailyGoalMl, days.maxOfOrNull { it.amountMl } ?: 0)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1135,7 +1275,11 @@ private fun WeeklyTrendCard(days: List<DailyIntake>) {
                 fontWeight = FontWeight.SemiBold,
             )
             days.forEach { day ->
-                TrendBarRow(day = day, maxBarAmount = maxBarAmount)
+                TrendBarRow(
+                    day = day,
+                    maxBarAmount = maxBarAmount,
+                    dailyGoalMl = dailyGoalMl,
+                )
             }
         }
     }
@@ -1145,10 +1289,11 @@ private fun WeeklyTrendCard(days: List<DailyIntake>) {
 private fun TrendBarRow(
     day: DailyIntake,
     maxBarAmount: Int,
+    dailyGoalMl: Int,
 ) {
     val progress = (day.amountMl.toFloat() / maxBarAmount).coerceIn(0f, 1f)
     val barColor = when {
-        day.amountMl >= DailyGoalMl -> Color(0xFF2EAD5B)
+        day.amountMl >= dailyGoalMl -> Color(0xFF2EAD5B)
         day.isToday -> Color(0xFF1683D8)
         else -> Color(0xFF76B9E8)
     }
@@ -1168,7 +1313,7 @@ private fun TrendBarRow(
                 fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Normal,
                 style = MaterialTheme.typography.bodySmall,
             )
-            if (day.amountMl >= DailyGoalMl) {
+            if (day.amountMl >= dailyGoalMl) {
                 Text(
                     text = "\u2713",
                     color = Color(0xFF168344),
@@ -1493,19 +1638,21 @@ private fun buildWeeklyTrend(records: List<IntakeRecord>): List<DailyIntake> {
 private fun buildPaceStatus(
     actualMl: Int,
     now: LocalTime,
+    dailyGoalMl: Int,
 ): PaceStatus {
     val target = paceTargets.lastOrNull { !now.isBefore(it.time) } ?: paceTargets.first()
-    val remainingMl = (target.expectedMl - actualMl).coerceAtLeast(0)
+    val expectedMl = scaleForDailyGoal(target.expectedMl, dailyGoalMl)
+    val remainingMl = (expectedMl - actualMl).coerceAtLeast(0)
     val state = when {
-        actualMl >= target.expectedMl -> PaceState.OnTrack
-        target.expectedMl < 300 -> PaceState.OnTrack
+        actualMl >= expectedMl -> PaceState.OnTrack
+        expectedMl < scaleForDailyGoal(300, dailyGoalMl) -> PaceState.OnTrack
         remainingMl < 300 -> PaceState.SlightlyBehind
         else -> PaceState.Behind
     }
 
     return PaceStatus(
         targetTimeLabel = target.time.format(DateTimeFormatter.ofPattern("H:mm")),
-        expectedMl = target.expectedMl,
+        expectedMl = expectedMl,
         actualMl = actualMl,
         remainingMl = remainingMl,
         message = when (state) {
@@ -1741,9 +1888,11 @@ private fun MizunomiAppPreview() {
             ),
         ),
         reminderEnabled = true,
+        dailyGoalMl = DefaultDailyGoalMl,
         onAddRecord = { _, amountMl, onSaved -> onSaved(400 + amountMl) },
         onUpdateRecord = { _, _, _ -> },
         onDeleteRecord = {},
         onReminderEnabledChange = {},
+        onDailyGoalChange = {},
     )
 }
