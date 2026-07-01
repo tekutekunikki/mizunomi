@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -65,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import com.tekutekunikki.mizunomi.data.IntakeRecord
 import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
 import com.tekutekunikki.mizunomi.data.MizunomiDatabase
+import com.tekutekunikki.mizunomi.data.buildIntakeRecordsCsv
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -73,7 +75,9 @@ import java.time.ZoneId
 import java.time.format.TextStyle
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val WeeklyTrendDays = 7L
 private const val SweetDrinkWarningThresholdMl = 500
@@ -85,6 +89,12 @@ private data class RecordFeedback(
     val amountMl: Int,
     val todayTotalMl: Int,
 )
+
+private sealed interface CsvExportStatus {
+    data object InProgress : CsvExportStatus
+    data object Success : CsvExportStatus
+    data class Error(val message: String) : CsvExportStatus
+}
 
 private val DrinkTypes = listOf(
     "\u6C34",
@@ -207,6 +217,16 @@ fun MizunomiApp(
                 reminderSettingsRepository.setDailyGoalMl(dailyGoalMl)
             }
         },
+        onPrepareCsvExport = { onReady, onError ->
+            scope.launch {
+                runCatching {
+                    buildIntakeRecordsCsv(repository.getAllRecords())
+                }.onSuccess(onReady)
+                    .onFailure {
+                        onError("CSVデータを準備できませんでした。もう一度お試しください。")
+                    }
+            }
+        },
     )
 }
 
@@ -226,6 +246,10 @@ fun MizunomiAppContent(
     onDeleteRecord: (record: IntakeRecord) -> Unit,
     onReminderEnabledChange: (Boolean) -> Unit,
     onDailyGoalChange: (Int) -> Unit,
+    onPrepareCsvExport: (
+        onReady: (csvContent: String) -> Unit,
+        onError: (message: String) -> Unit,
+    ) -> Unit,
 ) {
     val drinkTypes = DrinkTypes
     val amounts = listOf(100, 200, 300, 500)
@@ -234,7 +258,42 @@ fun MizunomiAppContent(
     var deletingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     var voiceInputState by remember { mutableStateOf<VoiceInputState?>(null) }
     var recordFeedback by remember { mutableStateOf<RecordFeedback?>(null) }
+    var csvExportStatus by remember { mutableStateOf<CsvExportStatus?>(null) }
+    var pendingCsvContent by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableStateOf(AppTab.Home) }
+    val context = LocalContext.current
+    val uiScope = rememberCoroutineScope()
+    val createCsvDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        val csvContent = pendingCsvContent
+        pendingCsvContent = null
+        if (uri == null) {
+            csvExportStatus = null
+        } else if (csvContent == null) {
+            csvExportStatus = CsvExportStatus.Error("CSVデータを保存できませんでした。")
+        } else {
+            uiScope.launch {
+                csvExportStatus = CsvExportStatus.InProgress
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        val outputStream = requireNotNull(
+                            context.contentResolver.openOutputStream(uri, "wt"),
+                        )
+                        outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
+                            writer.write(csvContent)
+                        }
+                    }
+                }.onSuccess {
+                    csvExportStatus = CsvExportStatus.Success
+                }.onFailure {
+                    csvExportStatus = CsvExportStatus.Error(
+                        "CSVファイルを書き出せませんでした。保存先を確認してください。",
+                    )
+                }
+            }
+        }
+    }
     val addRecordWithFeedback = { drinkType: String, amountMl: Int ->
         onAddRecord(drinkType, amountMl) { updatedTotalMl ->
             recordFeedback = RecordFeedback(
@@ -376,6 +435,21 @@ fun MizunomiAppContent(
                     dailyGoalMl = dailyGoalMl,
                     onReminderEnabledChange = onReminderEnabledChange,
                     onDailyGoalChange = onDailyGoalChange,
+                    csvExportStatus = csvExportStatus,
+                    onExportCsv = {
+                        csvExportStatus = CsvExportStatus.InProgress
+                        onPrepareCsvExport(
+                            { csvContent ->
+                                pendingCsvContent = csvContent
+                                createCsvDocumentLauncher.launch(
+                                    "mizunomi-records-${LocalDate.now()}.csv",
+                                )
+                            },
+                            { message ->
+                                csvExportStatus = CsvExportStatus.Error(message)
+                            },
+                        )
+                    },
                 )
             }
         }
@@ -591,6 +665,8 @@ private fun SettingsTabContent(
     dailyGoalMl: Int,
     onReminderEnabledChange: (Boolean) -> Unit,
     onDailyGoalChange: (Int) -> Unit,
+    csvExportStatus: CsvExportStatus?,
+    onExportCsv: () -> Unit,
 ) {
     var showDailyGoalDialog by remember { mutableStateOf(false) }
 
@@ -613,6 +689,12 @@ private fun SettingsTabContent(
                 dailyGoalMl = dailyGoalMl,
                 onReminderEnabledChange = onReminderEnabledChange,
                 onDailyGoalClick = { showDailyGoalDialog = true },
+            )
+        }
+        item {
+            DataManagementCard(
+                exportStatus = csvExportStatus,
+                onExportCsv = onExportCsv,
             )
         }
     }
@@ -714,6 +796,99 @@ private fun SettingsFoundationCard(
                 color = Color(0xFF6C7A86),
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
+    }
+}
+
+@Composable
+private fun DataManagementCard(
+    exportStatus: CsvExportStatus?,
+    onExportCsv: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "データ管理",
+                        color = Color(0xFF25384A),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "記録を端末に保存",
+                        color = Color(0xFF6C7A86),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F3FB)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                ) {
+                    Text(
+                        text = "CSV",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        color = Color(0xFF116DAE),
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+            Text(
+                text = "すべての水分記録を、日時・飲み物・量・メモを含むCSVファイルに書き出します。",
+                color = Color(0xFF526777),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Button(
+                onClick = onExportCsv,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = exportStatus !is CsvExportStatus.InProgress,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1683D8)),
+                shape = RoundedCornerShape(16.dp),
+                contentPadding = PaddingValues(vertical = 14.dp),
+            ) {
+                Text(
+                    text = if (exportStatus is CsvExportStatus.InProgress) {
+                        "CSVを準備しています…"
+                    } else {
+                        "データを書き出す（CSV）"
+                    },
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            when (exportStatus) {
+                CsvExportStatus.Success -> Text(
+                    text = "✓ CSVファイルを書き出しました",
+                    color = Color(0xFF168344),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+
+                is CsvExportStatus.Error -> Text(
+                    text = exportStatus.message,
+                    color = Color(0xFFB3261E),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+
+                CsvExportStatus.InProgress, null -> Unit
+            }
         }
     }
 }
@@ -1894,5 +2069,6 @@ private fun MizunomiAppPreview() {
         onDeleteRecord = {},
         onReminderEnabledChange = {},
         onDailyGoalChange = {},
+        onPrepareCsvExport = { onReady, _ -> onReady("date,time,drinkType,amountMl,memo\n") },
     )
 }
