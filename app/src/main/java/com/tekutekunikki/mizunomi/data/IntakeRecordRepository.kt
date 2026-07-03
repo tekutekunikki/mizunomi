@@ -36,6 +36,9 @@ class IntakeRecordRepository(
 
     suspend fun getAllRecords(): List<IntakeRecord> = dao.getAllRecords()
 
+    suspend fun importRecords(records: List<IntakeRecord>): Int =
+        dao.insertAll(records).size
+
     suspend fun addRecord(
         drinkType: String,
         amountMl: Int,

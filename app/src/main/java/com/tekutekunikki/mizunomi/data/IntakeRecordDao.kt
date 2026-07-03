@@ -12,6 +12,9 @@ interface IntakeRecordDao {
     @Insert
     suspend fun insert(record: IntakeRecord): Long
 
+    @Insert
+    suspend fun insertAll(records: List<IntakeRecord>): List<Long>
+
     @Query(
         """
         SELECT *
