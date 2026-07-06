@@ -2,6 +2,7 @@ package com.tekutekunikki.mizunomi
 
 import android.Manifest
 import android.app.Activity
+import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -72,6 +73,7 @@ import java.text.NumberFormat
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -83,6 +85,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val WeeklyTrendDays = 7L
+private const val PastRecordLimitDays = 30L
 private const val SweetDrinkWarningThresholdMl = 500
 private const val BalancedDrinkTotalThresholdMl = 1000
 private const val WaterTeaMinimumThresholdMl = 500
@@ -91,7 +94,8 @@ private val MonthDayFormatter = DateTimeFormatter.ofPattern("M/d", Locale.JAPAN)
 private data class RecordFeedback(
     val drinkType: String,
     val amountMl: Int,
-    val todayTotalMl: Int,
+    val recordedAt: LocalDateTime,
+    val dayTotalMl: Int,
 )
 
 private sealed interface CsvExportStatus {
@@ -173,6 +177,8 @@ fun MizunomiApp(
         .collectAsState(initial = 0)
     val todayRecords by repository.observeTodayRecords()
         .collectAsState(initial = emptyList())
+    val recentRecords by repository.observeRecentRecords(PastRecordLimitDays + 1)
+        .collectAsState(initial = emptyList())
     val weeklyRecords by repository.observeRecordsForWeekContaining(LocalDate.now())
         .collectAsState(initial = emptyList())
     val reminderEnabled by reminderSettingsRepository.reminderEnabled
@@ -188,18 +194,20 @@ fun MizunomiApp(
     MizunomiAppContent(
         todayTotalMl = todayTotalMl,
         todayRecords = todayRecords,
+        recentRecords = recentRecords,
         weeklyRecords = weeklyRecords,
         reminderEnabled = reminderEnabled,
         dailyGoalMl = dailyGoalMl,
         wakeTimeMinutes = wakeTimeMinutes,
         bedTimeMinutes = bedTimeMinutes,
-        onAddRecord = { drinkType, amountMl, onSaved ->
+        onAddRecord = { drinkType, amountMl, timestamp, recordDate, onSaved ->
             scope.launch {
                 repository.addRecord(
                     drinkType = drinkType,
                     amountMl = amountMl,
+                    timestamp = timestamp,
                 )
-                onSaved(repository.getTotalAmountForDay(LocalDate.now()))
+                onSaved(repository.getTotalAmountForDay(recordDate))
             }
         },
         onUpdateRecord = { record, drinkType, amountMl ->
@@ -250,6 +258,7 @@ fun MizunomiApp(
 fun MizunomiAppContent(
     todayTotalMl: Int,
     todayRecords: List<IntakeRecord>,
+    recentRecords: List<IntakeRecord>,
     weeklyRecords: List<IntakeRecord>,
     reminderEnabled: Boolean,
     dailyGoalMl: Int,
@@ -258,7 +267,9 @@ fun MizunomiAppContent(
     onAddRecord: (
         drinkType: String,
         amountMl: Int,
-        onSaved: (todayTotalMl: Int) -> Unit,
+        timestamp: Long,
+        recordDate: LocalDate,
+        onSaved: (dayTotalMl: Int) -> Unit,
     ) -> Unit,
     onUpdateRecord: (record: IntakeRecord, drinkType: String, amountMl: Int) -> Unit,
     onDeleteRecord: (record: IntakeRecord) -> Unit,
@@ -278,6 +289,9 @@ fun MizunomiAppContent(
     var deletingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     var voiceInputState by remember { mutableStateOf<VoiceInputState?>(null) }
     var recordFeedback by remember { mutableStateOf<RecordFeedback?>(null) }
+    var selectedRecordDate by remember { mutableStateOf(LocalDate.now()) }
+    var selectedRecordTime by remember { mutableStateOf<LocalTime?>(null) }
+    var recordDateTimeError by remember { mutableStateOf<String?>(null) }
     var csvExportStatus by remember { mutableStateOf<CsvExportStatus?>(null) }
     var pendingCsvContent by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableStateOf(AppTab.Home) }
@@ -315,12 +329,27 @@ fun MizunomiAppContent(
         }
     }
     val addRecordWithFeedback = { drinkType: String, amountMl: Int ->
-        onAddRecord(drinkType, amountMl) { updatedTotalMl ->
-            recordFeedback = RecordFeedback(
-                drinkType = drinkType,
-                amountMl = amountMl,
-                todayTotalMl = updatedTotalMl,
-            )
+        val now = LocalDateTime.now()
+        val recordDateTime = LocalDateTime.of(
+            selectedRecordDate,
+            selectedRecordTime ?: now.toLocalTime(),
+        ).withSecond(0).withNano(0)
+        val validationError = validateRecordDateTime(recordDateTime, now)
+        recordDateTimeError = validationError
+        if (validationError == null) {
+            onAddRecord(
+                drinkType,
+                amountMl,
+                recordDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                recordDateTime.toLocalDate(),
+            ) { updatedDayTotalMl ->
+                recordFeedback = RecordFeedback(
+                    drinkType = drinkType,
+                    amountMl = amountMl,
+                    recordedAt = recordDateTime,
+                    dayTotalMl = updatedDayTotalMl,
+                )
+            }
         }
     }
     val voiceInputLauncher = rememberLauncherForActivityResult(
@@ -429,6 +458,21 @@ fun MizunomiAppContent(
                     onDrinkTypeSelected = { selectedDrinkType = it },
                     feedback = recordFeedback,
                     dailyGoalMl = dailyGoalMl,
+                    selectedRecordDate = selectedRecordDate,
+                    selectedRecordTime = selectedRecordTime,
+                    recordDateTimeError = recordDateTimeError,
+                    onRecordDateSelected = { date ->
+                        selectedRecordDate = date
+                        recordDateTimeError = null
+                    },
+                    onUseCurrentTime = {
+                        selectedRecordTime = null
+                        recordDateTimeError = null
+                    },
+                    onRecordTimeSelected = { time ->
+                        selectedRecordTime = time
+                        recordDateTimeError = null
+                    },
                     onQuickAdd = { amountMl ->
                         addRecordWithFeedback(selectedDrinkType, amountMl)
                     },
@@ -450,7 +494,7 @@ fun MizunomiAppContent(
                     weeklyTrend = weeklyTrend,
                     dailyGoalMl = dailyGoalMl,
                     drinkSummaries = drinkSummaries,
-                    todayRecords = todayRecords,
+                    recentRecords = recentRecords.sortedByDescending { it.timestamp },
                     onEdit = { editingRecord = it },
                     onDelete = { deletingRecord = it },
                 )
@@ -566,6 +610,12 @@ private fun RecordTabContent(
     onDrinkTypeSelected: (String) -> Unit,
     feedback: RecordFeedback?,
     dailyGoalMl: Int,
+    selectedRecordDate: LocalDate,
+    selectedRecordTime: LocalTime?,
+    recordDateTimeError: String?,
+    onRecordDateSelected: (LocalDate) -> Unit,
+    onUseCurrentTime: () -> Unit,
+    onRecordTimeSelected: (LocalTime) -> Unit,
     onQuickAdd: (Int) -> Unit,
     onVoiceInput: () -> Unit,
 ) {
@@ -577,6 +627,12 @@ private fun RecordTabContent(
                 amounts = amounts,
                 selectedDrinkType = selectedDrinkType,
                 onDrinkTypeSelected = onDrinkTypeSelected,
+                selectedRecordDate = selectedRecordDate,
+                selectedRecordTime = selectedRecordTime,
+                recordDateTimeError = recordDateTimeError,
+                onRecordDateSelected = onRecordDateSelected,
+                onUseCurrentTime = onUseCurrentTime,
+                onRecordTimeSelected = onRecordTimeSelected,
                 onQuickAdd = onQuickAdd,
                 onVoiceInput = onVoiceInput,
             )
@@ -592,9 +648,11 @@ private fun RecordFeedbackCard(
     feedback: RecordFeedback,
     dailyGoalMl: Int,
 ) {
-    val goalAchieved = feedback.todayTotalMl >= dailyGoalMl
-    val remainingMl = (dailyGoalMl - feedback.todayTotalMl).coerceAtLeast(0)
+    val isToday = feedback.recordedAt.toLocalDate() == LocalDate.now()
+    val goalAchieved = isToday && feedback.dayTotalMl >= dailyGoalMl
+    val remainingMl = (dailyGoalMl - feedback.dayTotalMl).coerceAtLeast(0)
     val numberFormat = remember { NumberFormat.getNumberInstance(Locale.JAPAN) }
+    val dateTimeFormatter = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm") }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -620,8 +678,12 @@ private fun RecordFeedbackCard(
             )
             Text(
                 text = buildString {
+                    if (!isToday) {
+                        append(feedback.recordedAt.format(dateTimeFormatter))
+                        append(" に ")
+                    }
                     append(feedback.drinkType)
-                    append(" ")
+                    append(' ')
                     append(numberFormat.format(feedback.amountMl))
                     append("ml")
                     if (goalAchieved) append(" を記録しました")
@@ -631,12 +693,16 @@ private fun RecordFeedbackCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "今日の合計 ${numberFormat.format(feedback.todayTotalMl)}ml / " +
-                    "${numberFormat.format(dailyGoalMl)}ml",
+                text = if (isToday) {
+                    "今日の合計 ${numberFormat.format(feedback.dayTotalMl)}ml / " +
+                        "${numberFormat.format(dailyGoalMl)}ml"
+                } else {
+                    "この日の合計 ${numberFormat.format(feedback.dayTotalMl)}ml"
+                },
                 color = Color(0xFF315C47),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            if (!goalAchieved) {
+            if (isToday && !goalAchieved) {
                 Text(
                     text = "あと ${numberFormat.format(remainingMl)}ml",
                     color = Color(0xFF315C47),
@@ -654,7 +720,7 @@ private fun HistoryTabContent(
     weeklyTrend: List<DailyIntake>,
     dailyGoalMl: Int,
     drinkSummaries: List<DrinkSummary>,
-    todayRecords: List<IntakeRecord>,
+    recentRecords: List<IntakeRecord>,
     onEdit: (IntakeRecord) -> Unit,
     onDelete: (IntakeRecord) -> Unit,
 ) {
@@ -672,12 +738,12 @@ private fun HistoryTabContent(
                 fontWeight = FontWeight.SemiBold,
             )
         }
-        if (todayRecords.isEmpty()) {
+        if (recentRecords.isEmpty()) {
             item {
                 EmptyHistoryCard()
             }
         } else {
-            items(todayRecords.take(6), key = { it.id }) { record ->
+            items(recentRecords.take(10), key = { it.id }) { record ->
                 IntakeRecordRow(
                     record = record,
                     onEdit = onEdit,
@@ -1401,7 +1467,7 @@ private fun EditRecordDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(
-                    text = record.timestamp.toTimeText(),
+                    text = record.timestamp.toRecordDateTimeText(),
                     color = Color(0xFF6C7A86),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1707,6 +1773,12 @@ private fun AddIntakeCard(
     amounts: List<Int>,
     selectedDrinkType: String,
     onDrinkTypeSelected: (String) -> Unit,
+    selectedRecordDate: LocalDate,
+    selectedRecordTime: LocalTime?,
+    recordDateTimeError: String?,
+    onRecordDateSelected: (LocalDate) -> Unit,
+    onUseCurrentTime: () -> Unit,
+    onRecordTimeSelected: (LocalTime) -> Unit,
     onQuickAdd: (Int) -> Unit,
     onVoiceInput: () -> Unit,
 ) {
@@ -1725,6 +1797,14 @@ private fun AddIntakeCard(
                 color = Color(0xFF25384A),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
+            )
+            RecordDateTimeSelector(
+                selectedDate = selectedRecordDate,
+                selectedTime = selectedRecordTime,
+                errorMessage = recordDateTimeError,
+                onDateSelected = onRecordDateSelected,
+                onUseCurrentTime = onUseCurrentTime,
+                onTimeSelected = onRecordTimeSelected,
             )
             OutlinedButton(
                 onClick = onVoiceInput,
@@ -1745,6 +1825,142 @@ private fun AddIntakeCard(
             QuickAmountGrid(
                 amounts = amounts,
                 onQuickAdd = onQuickAdd,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordDateTimeSelector(
+    selectedDate: LocalDate,
+    selectedTime: LocalTime?,
+    errorMessage: String?,
+    onDateSelected: (LocalDate) -> Unit,
+    onUseCurrentTime: () -> Unit,
+    onTimeSelected: (LocalTime) -> Unit,
+) {
+    val context = LocalContext.current
+    val today = LocalDate.now()
+    val displayTime = selectedTime ?: LocalTime.now()
+    val displayDate = when (selectedDate) {
+        today -> "今日"
+        today.minusDays(1) -> "昨日"
+        else -> selectedDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF5FC)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = "記録日時",
+                    color = Color(0xFF527189),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "$displayDate ${displayTime.format(DateTimeFormatter.ofPattern("HH:mm"))}",
+                    color = Color(0xFF0F5F94),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        Text(
+            text = "日付",
+            color = Color(0xFF526777),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SelectButton(
+                text = "今日",
+                selected = selectedDate == today,
+                modifier = Modifier.weight(1f),
+                onClick = { onDateSelected(today) },
+            )
+            SelectButton(
+                text = "昨日",
+                selected = selectedDate == today.minusDays(1),
+                modifier = Modifier.weight(1f),
+                onClick = { onDateSelected(today.minusDays(1)) },
+            )
+            SelectButton(
+                text = "日付を選択",
+                selected = selectedDate != today && selectedDate != today.minusDays(1),
+                modifier = Modifier.weight(1.35f),
+                onClick = {
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, dayOfMonth ->
+                            onDateSelected(LocalDate.of(year, month + 1, dayOfMonth))
+                        },
+                        selectedDate.year,
+                        selectedDate.monthValue - 1,
+                        selectedDate.dayOfMonth,
+                    ).apply {
+                        datePicker.minDate = today.minusDays(PastRecordLimitDays)
+                            .atStartOfDay(ZoneId.systemDefault())
+                            .toInstant()
+                            .toEpochMilli()
+                        datePicker.maxDate = today.plusDays(1)
+                            .atStartOfDay(ZoneId.systemDefault())
+                            .toInstant()
+                            .toEpochMilli() - 1
+                    }.show()
+                },
+            )
+        }
+        Text(
+            text = "時刻",
+            color = Color(0xFF526777),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SelectButton(
+                text = "現在時刻",
+                selected = selectedTime == null,
+                modifier = Modifier.weight(1f),
+                onClick = onUseCurrentTime,
+            )
+            SelectButton(
+                text = selectedTime?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "時刻を選択",
+                selected = selectedTime != null,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    val initialTime = selectedTime ?: LocalTime.now()
+                    TimePickerDialog(
+                        context,
+                        { _, hourOfDay, minute ->
+                            onTimeSelected(LocalTime.of(hourOfDay, minute))
+                        },
+                        initialTime.hour,
+                        initialTime.minute,
+                        true,
+                    ).show()
+                },
+            )
+        }
+        errorMessage?.let { message ->
+            Text(
+                text = message,
+                color = Color(0xFFB3261E),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
             )
         }
     }
@@ -1894,7 +2110,7 @@ private fun IntakeRecordRow(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = record.timestamp.toTimeText(),
+                    text = record.timestamp.toRecordDateTimeText(),
                     color = Color(0xFF7C8A96),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1928,11 +2144,29 @@ private fun IntakeRecordRow(
     }
 }
 
-private fun Long.toTimeText(): String =
-    Instant.ofEpochMilli(this)
-        .atZone(ZoneId.systemDefault())
-        .toLocalTime()
-        .format(DateTimeFormatter.ofPattern("HH:mm"))
+private fun Long.toRecordDateTimeText(): String {
+    val dateTime = Instant.ofEpochMilli(this).atZone(ZoneId.systemDefault()).toLocalDateTime()
+    val today = LocalDate.now()
+    val dateLabel = when (dateTime.toLocalDate()) {
+        today -> "今日"
+        today.minusDays(1) -> "昨日"
+        else -> dateTime.toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
+    }
+    return "$dateLabel ${dateTime.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm"))}"
+}
+
+private fun validateRecordDateTime(
+    recordDateTime: LocalDateTime,
+    now: LocalDateTime,
+): String? = when {
+    recordDateTime.toLocalDate().isBefore(now.toLocalDate().minusDays(PastRecordLimitDays)) ->
+        "記録できるのは過去30日までです。"
+
+    recordDateTime.isAfter(now) ->
+        "未来の日時は記録できません。日時を変更してください。"
+
+    else -> null
+}
 
 private fun buildWeeklyTrend(records: List<IntakeRecord>): List<DailyIntake> {
     val zoneId = ZoneId.systemDefault()
@@ -2197,6 +2431,15 @@ private fun MizunomiAppPreview() {
                 memo = null,
             ),
         ),
+        recentRecords = listOf(
+            IntakeRecord(
+                id = 1,
+                drinkType = "\u6C34",
+                amountMl = 200,
+                timestamp = 0,
+                memo = null,
+            ),
+        ),
         weeklyRecords = listOf(
             IntakeRecord(
                 id = 1,
@@ -2210,7 +2453,7 @@ private fun MizunomiAppPreview() {
         dailyGoalMl = DefaultDailyGoalMl,
         wakeTimeMinutes = DefaultWakeTimeMinutes,
         bedTimeMinutes = DefaultBedTimeMinutes,
-        onAddRecord = { _, amountMl, onSaved -> onSaved(400 + amountMl) },
+        onAddRecord = { _, amountMl, _, _, onSaved -> onSaved(400 + amountMl) },
         onUpdateRecord = { _, _, _ -> },
         onDeleteRecord = {},
         onReminderEnabledChange = {},
