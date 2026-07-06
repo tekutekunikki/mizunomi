@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -61,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,6 +95,7 @@ private const val SweetDrinkWarningThresholdMl = 500
 private const val BalancedDrinkTotalThresholdMl = 1000
 private const val WaterTeaMinimumThresholdMl = 500
 private val MonthDayFormatter = DateTimeFormatter.ofPattern("M/d", Locale.JAPAN)
+private val WeekRangeFormatter = DateTimeFormatter.ofPattern("M/d(E)", Locale.JAPAN)
 
 private data class RecordFeedback(
     val drinkType: String,
@@ -181,8 +185,12 @@ fun MizunomiApp(
         .collectAsState(initial = emptyList())
     val recentRecords by repository.observeRecentRecords(PastRecordLimitDays + 1)
         .collectAsState(initial = emptyList())
-    val weeklyRecords by repository.observeRecordsForWeekContaining(LocalDate.now())
-        .collectAsState(initial = emptyList())
+    val currentWeekStart = remember { LocalDate.now().startOfWeek() }
+    var displayedWeekStart by remember { mutableStateOf(currentWeekStart) }
+    val weeklyRecords by key(displayedWeekStart) {
+        repository.observeRecordsForWeekContaining(displayedWeekStart)
+            .collectAsState(initial = emptyList())
+    }
     val reminderEnabled by reminderSettingsRepository.reminderEnabled
         .collectAsState(initial = true)
     val dailyGoalMl by reminderSettingsRepository.dailyGoalMl
@@ -198,6 +206,8 @@ fun MizunomiApp(
         todayRecords = todayRecords,
         recentRecords = recentRecords,
         weeklyRecords = weeklyRecords,
+        displayedWeekStart = displayedWeekStart,
+        currentWeekStart = currentWeekStart,
         reminderEnabled = reminderEnabled,
         dailyGoalMl = dailyGoalMl,
         wakeTimeMinutes = wakeTimeMinutes,
@@ -243,6 +253,12 @@ fun MizunomiApp(
         onBedTimeChange = { minutes ->
             scope.launch { reminderSettingsRepository.setBedTimeMinutes(minutes) }
         },
+        onDisplayedWeekStartChange = { requestedWeekStart ->
+            val normalizedWeekStart = requestedWeekStart.startOfWeek()
+            if (!normalizedWeekStart.isAfter(currentWeekStart)) {
+                displayedWeekStart = normalizedWeekStart
+            }
+        },
         onPrepareCsvExport = { onReady, onError ->
             scope.launch {
                 runCatching {
@@ -262,6 +278,8 @@ fun MizunomiAppContent(
     todayRecords: List<IntakeRecord>,
     recentRecords: List<IntakeRecord>,
     weeklyRecords: List<IntakeRecord>,
+    displayedWeekStart: LocalDate,
+    currentWeekStart: LocalDate,
     reminderEnabled: Boolean,
     dailyGoalMl: Int,
     wakeTimeMinutes: Int,
@@ -279,6 +297,7 @@ fun MizunomiAppContent(
     onDailyGoalChange: (Int) -> Unit,
     onWakeTimeChange: (Int) -> Unit,
     onBedTimeChange: (Int) -> Unit,
+    onDisplayedWeekStartChange: (LocalDate) -> Unit,
     onPrepareCsvExport: (
         onReady: (csvContent: String) -> Unit,
         onError: (message: String) -> Unit,
@@ -375,8 +394,8 @@ fun MizunomiAppContent(
         wakeTimeMinutes = wakeTimeMinutes,
         bedTimeMinutes = bedTimeMinutes,
     )
-    val weeklyTrend = remember(weeklyRecords) {
-        buildWeeklyTrend(weeklyRecords)
+    val weeklyTrend = remember(weeklyRecords, displayedWeekStart) {
+        buildWeeklyTrend(weeklyRecords, displayedWeekStart)
     }
     val drinkNotices = remember(todayRecords, todayTotalMl) {
         buildDrinkNotices(todayRecords, todayTotalMl)
@@ -494,11 +513,14 @@ fun MizunomiAppContent(
                 AppTab.History -> HistoryTabContent(
                     contentPadding = innerPadding,
                     weeklyTrend = weeklyTrend,
+                    displayedWeekStart = displayedWeekStart,
+                    currentWeekStart = currentWeekStart,
                     dailyGoalMl = dailyGoalMl,
                     drinkSummaries = drinkSummaries,
                     recentRecords = recentRecords.sortedByDescending { it.timestamp },
                     onEdit = { editingRecord = it },
                     onDelete = { deletingRecord = it },
+                    onDisplayedWeekStartChange = onDisplayedWeekStartChange,
                 )
 
                 AppTab.Settings -> SettingsTabContent(
@@ -720,15 +742,26 @@ private fun RecordFeedbackCard(
 private fun HistoryTabContent(
     contentPadding: PaddingValues,
     weeklyTrend: List<DailyIntake>,
+    displayedWeekStart: LocalDate,
+    currentWeekStart: LocalDate,
     dailyGoalMl: Int,
     drinkSummaries: List<DrinkSummary>,
     recentRecords: List<IntakeRecord>,
     onEdit: (IntakeRecord) -> Unit,
     onDelete: (IntakeRecord) -> Unit,
+    onDisplayedWeekStartChange: (LocalDate) -> Unit,
 ) {
     MizunomiTabList(contentPadding = contentPadding) {
         item { TabHeader(title = "履歴", subtitle = "最近の記録と7日間の変化") }
-        item { WeeklyTrendCard(days = weeklyTrend, dailyGoalMl = dailyGoalMl) }
+        item {
+            WeeklyTrendCard(
+                days = weeklyTrend,
+                weekStart = displayedWeekStart,
+                currentWeekStart = currentWeekStart,
+                dailyGoalMl = dailyGoalMl,
+                onWeekStartChange = onDisplayedWeekStartChange,
+            )
+        }
         if (drinkSummaries.isNotEmpty()) {
             item { TypeSummaryCard(summaries = drinkSummaries) }
         }
@@ -1636,15 +1669,41 @@ private fun AchievementBadge() {
 @Composable
 private fun WeeklyTrendCard(
     days: List<DailyIntake>,
+    weekStart: LocalDate,
+    currentWeekStart: LocalDate,
     dailyGoalMl: Int,
+    onWeekStartChange: (LocalDate) -> Unit,
 ) {
     val maxBarAmount = maxOf(dailyGoalMl, days.maxOfOrNull { it.amountMl } ?: 0)
     val weeklyTotalMl = days.sumOf { it.amountMl }
     val dailyAverageMl = if (days.isEmpty()) 0 else weeklyTotalMl / days.size
     val numberFormat = remember { NumberFormat.getNumberInstance(Locale.JAPAN) }
+    val normalizedWeekStart = weekStart.startOfWeek()
+    val normalizedCurrentWeekStart = currentWeekStart.startOfWeek()
+    val isCurrentWeek = normalizedWeekStart == normalizedCurrentWeekStart
+    val canGoToNextWeek = normalizedWeekStart.isBefore(normalizedCurrentWeekStart)
+    val weekEnd = normalizedWeekStart.plusDays(WeeklyTrendDays - 1)
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(normalizedWeekStart, canGoToNextWeek) {
+                val swipeThreshold = 48.dp.toPx()
+                var totalDrag = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDrag = 0f },
+                    onHorizontalDrag = { _, dragAmount -> totalDrag += dragAmount },
+                    onDragEnd = {
+                        when {
+                            totalDrag > swipeThreshold ->
+                                onWeekStartChange(normalizedWeekStart.minusWeeks(1))
+
+                            totalDrag < -swipeThreshold && canGoToNextWeek ->
+                                onWeekStartChange(normalizedWeekStart.plusWeeks(1))
+                        }
+                    },
+                )
+            },
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -1653,12 +1712,58 @@ private fun WeeklyTrendCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "\u9031\u9593\u306E\u6C34\u5206\u6442\u53D6",
+                        color = Color(0xFF25384A),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (isCurrentWeek) {
+                        Text(
+                            text = "\u4ECA\u9031",
+                            color = Color(0xFF0F6FAE),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                if (!isCurrentWeek) {
+                    TextButton(onClick = { onWeekStartChange(normalizedCurrentWeekStart) }) {
+                        Text(text = "\u4ECA\u9031\u3078\u623B\u308B")
+                    }
+                }
+            }
+
             Text(
-                text = "\u4ECA\u9031\u306E\u6C34\u5206\u6442\u53D6",
-                color = Color(0xFF25384A),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
+                text = "${normalizedWeekStart.format(WeekRangeFormatter)} - " +
+                    weekEnd.format(WeekRangeFormatter),
+                color = Color(0xFF526777),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
             )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                TextButton(
+                    onClick = { onWeekStartChange(normalizedWeekStart.minusWeeks(1)) },
+                ) {
+                    Text(text = "\u2039 \u524D\u306E\u9031")
+                }
+                TextButton(
+                    onClick = { onWeekStartChange(normalizedWeekStart.plusWeeks(1)) },
+                    enabled = canGoToNextWeek,
+                ) {
+                    Text(text = "\u6B21\u306E\u9031 \u203A")
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -2241,10 +2346,13 @@ private fun validateRecordDateTime(
     else -> null
 }
 
-private fun buildWeeklyTrend(records: List<IntakeRecord>): List<DailyIntake> {
+private fun buildWeeklyTrend(
+    records: List<IntakeRecord>,
+    displayedWeekStart: LocalDate,
+): List<DailyIntake> {
     val zoneId = ZoneId.systemDefault()
     val today = LocalDate.now()
-    val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    val weekStart = displayedWeekStart.startOfWeek()
     val totalsByDate = records.groupBy {
         Instant.ofEpochMilli(it.timestamp)
             .atZone(zoneId)
@@ -2264,6 +2372,9 @@ private fun buildWeeklyTrend(records: List<IntakeRecord>): List<DailyIntake> {
         )
     }
 }
+
+private fun LocalDate.startOfWeek(): LocalDate =
+    with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
 private fun buildPaceStatus(
     actualMl: Int,
@@ -2522,6 +2633,8 @@ private fun MizunomiAppPreview() {
                 memo = null,
             ),
         ),
+        displayedWeekStart = LocalDate.now().startOfWeek(),
+        currentWeekStart = LocalDate.now().startOfWeek(),
         reminderEnabled = true,
         dailyGoalMl = DefaultDailyGoalMl,
         wakeTimeMinutes = DefaultWakeTimeMinutes,
@@ -2533,6 +2646,7 @@ private fun MizunomiAppPreview() {
         onDailyGoalChange = {},
         onWakeTimeChange = {},
         onBedTimeChange = {},
+        onDisplayedWeekStartChange = {},
         onPrepareCsvExport = { onReady, _ -> onReady("date,time,drinkType,amountMl,memo\n") },
     )
 }
