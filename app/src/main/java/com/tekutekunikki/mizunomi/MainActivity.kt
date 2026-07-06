@@ -180,6 +180,10 @@ fun MizunomiApp(
         .collectAsState(initial = true)
     val dailyGoalMl by reminderSettingsRepository.dailyGoalMl
         .collectAsState(initial = DefaultDailyGoalMl)
+    val wakeTimeMinutes by reminderSettingsRepository.wakeTimeMinutes
+        .collectAsState(initial = DefaultWakeTimeMinutes)
+    val bedTimeMinutes by reminderSettingsRepository.bedTimeMinutes
+        .collectAsState(initial = DefaultBedTimeMinutes)
     val scope = rememberCoroutineScope()
 
     MizunomiAppContent(
@@ -188,6 +192,8 @@ fun MizunomiApp(
         recentRecords = recentRecords,
         reminderEnabled = reminderEnabled,
         dailyGoalMl = dailyGoalMl,
+        wakeTimeMinutes = wakeTimeMinutes,
+        bedTimeMinutes = bedTimeMinutes,
         onAddRecord = { drinkType, amountMl, timestamp, recordDate, onSaved ->
             scope.launch {
                 repository.addRecord(
@@ -223,6 +229,12 @@ fun MizunomiApp(
                 reminderSettingsRepository.setDailyGoalMl(dailyGoalMl)
             }
         },
+        onWakeTimeChange = { minutes ->
+            scope.launch { reminderSettingsRepository.setWakeTimeMinutes(minutes) }
+        },
+        onBedTimeChange = { minutes ->
+            scope.launch { reminderSettingsRepository.setBedTimeMinutes(minutes) }
+        },
         onPrepareCsvExport = { onReady, onError ->
             scope.launch {
                 runCatching {
@@ -243,6 +255,8 @@ fun MizunomiAppContent(
     recentRecords: List<IntakeRecord>,
     reminderEnabled: Boolean,
     dailyGoalMl: Int,
+    wakeTimeMinutes: Int,
+    bedTimeMinutes: Int,
     onAddRecord: (
         drinkType: String,
         amountMl: Int,
@@ -254,6 +268,8 @@ fun MizunomiAppContent(
     onDeleteRecord: (record: IntakeRecord) -> Unit,
     onReminderEnabledChange: (Boolean) -> Unit,
     onDailyGoalChange: (Int) -> Unit,
+    onWakeTimeChange: (Int) -> Unit,
+    onBedTimeChange: (Int) -> Unit,
     onPrepareCsvExport: (
         onReady: (csvContent: String) -> Unit,
         onError: (message: String) -> Unit,
@@ -343,7 +359,13 @@ fun MizunomiAppContent(
     val progress = (todayTotalMl.toFloat() / dailyGoalMl).coerceIn(0f, 1f)
     val progressPercent = (progress * 100).toInt()
     val isGoalAchieved = todayTotalMl >= dailyGoalMl
-    val paceStatus = buildPaceStatus(todayTotalMl, LocalTime.now(), dailyGoalMl)
+    val paceStatus = buildPaceStatus(
+        actualMl = todayTotalMl,
+        now = LocalTime.now(),
+        dailyGoalMl = dailyGoalMl,
+        wakeTimeMinutes = wakeTimeMinutes,
+        bedTimeMinutes = bedTimeMinutes,
+    )
     val weeklyTrend = remember(recentRecords) {
         buildWeeklyTrend(recentRecords)
     }
@@ -474,8 +496,12 @@ fun MizunomiAppContent(
                     contentPadding = innerPadding,
                     reminderEnabled = reminderEnabled,
                     dailyGoalMl = dailyGoalMl,
+                    wakeTimeMinutes = wakeTimeMinutes,
+                    bedTimeMinutes = bedTimeMinutes,
                     onReminderEnabledChange = onReminderEnabledChange,
                     onDailyGoalChange = onDailyGoalChange,
+                    onWakeTimeChange = onWakeTimeChange,
+                    onBedTimeChange = onBedTimeChange,
                     csvExportStatus = csvExportStatus,
                     onExportCsv = {
                         csvExportStatus = CsvExportStatus.InProgress
@@ -726,12 +752,18 @@ private fun SettingsTabContent(
     contentPadding: PaddingValues,
     reminderEnabled: Boolean,
     dailyGoalMl: Int,
+    wakeTimeMinutes: Int,
+    bedTimeMinutes: Int,
     onReminderEnabledChange: (Boolean) -> Unit,
     onDailyGoalChange: (Int) -> Unit,
+    onWakeTimeChange: (Int) -> Unit,
+    onBedTimeChange: (Int) -> Unit,
     csvExportStatus: CsvExportStatus?,
     onExportCsv: () -> Unit,
 ) {
     var showDailyGoalDialog by remember { mutableStateOf(false) }
+    var lifestyleError by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
     if (showDailyGoalDialog) {
         DailyGoalSelectionDialog(
@@ -752,6 +784,47 @@ private fun SettingsTabContent(
                 dailyGoalMl = dailyGoalMl,
                 onReminderEnabledChange = onReminderEnabledChange,
                 onDailyGoalClick = { showDailyGoalDialog = true },
+            )
+        }
+        item {
+            LifestyleSettingsCard(
+                wakeTimeMinutes = wakeTimeMinutes,
+                bedTimeMinutes = bedTimeMinutes,
+                errorMessage = lifestyleError,
+                onWakeTimeClick = {
+                    TimePickerDialog(
+                        context,
+                        { _, hour, minute ->
+                            val selectedMinutes = hour * 60 + minute
+                            if (selectedMinutes >= bedTimeMinutes) {
+                                lifestyleError = "起床時間は就寝時間より前にしてください"
+                            } else {
+                                lifestyleError = null
+                                onWakeTimeChange(selectedMinutes)
+                            }
+                        },
+                        wakeTimeMinutes / 60,
+                        wakeTimeMinutes % 60,
+                        true,
+                    ).show()
+                },
+                onBedTimeClick = {
+                    TimePickerDialog(
+                        context,
+                        { _, hour, minute ->
+                            val selectedMinutes = hour * 60 + minute
+                            if (selectedMinutes <= wakeTimeMinutes) {
+                                lifestyleError = "就寝時間は起床時間より後にしてください"
+                            } else {
+                                lifestyleError = null
+                                onBedTimeChange(selectedMinutes)
+                            }
+                        },
+                        bedTimeMinutes / 60,
+                        bedTimeMinutes % 60,
+                        true,
+                    ).show()
+                },
             )
         }
         item {
@@ -847,8 +920,6 @@ private fun SettingsFoundationCard(
                 enabled = reminderEnabled,
                 onEnabledChange = onReminderEnabledChange,
             )
-            SettingPreviewRow(label = "起床時刻", value = "8:00")
-            SettingPreviewRow(label = "就寝時刻", value = "22:00")
             Text(
                 text = "音声入力について",
                 color = Color(0xFF25384A),
@@ -860,6 +931,89 @@ private fun SettingsFoundationCard(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+    }
+}
+
+@Composable
+private fun LifestyleSettingsCard(
+    wakeTimeMinutes: Int,
+    bedTimeMinutes: Int,
+    errorMessage: String?,
+    onWakeTimeClick: () -> Unit,
+    onBedTimeClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = "生活リズム",
+                color = Color(0xFF25384A),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            TimeSettingRow(
+                label = "起床時間",
+                value = formatTimeMinutes(wakeTimeMinutes),
+                supportingText = "水分補給を始める時刻",
+                onClick = onWakeTimeClick,
+            )
+            TimeSettingRow(
+                label = "就寝時間",
+                value = formatTimeMinutes(bedTimeMinutes),
+                supportingText = "1日の水分補給を終える時刻",
+                onClick = onBedTimeClick,
+            )
+            errorMessage?.let { message ->
+                Text(
+                    text = message,
+                    color = Color(0xFFB3261E),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeSettingRow(
+    label: String,
+    value: String,
+    supportingText: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 7.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(text = label, color = Color(0xFF31485B), fontWeight = FontWeight.Medium)
+            Text(
+                text = supportingText,
+                color = Color(0xFF6C7A86),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Text(
+            text = "$value  ›",
+            color = Color(0xFF116DAE),
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+        )
     }
 }
 
@@ -1075,25 +1229,6 @@ private fun ReminderToggleRow(
                 uncheckedTrackColor = Color(0xFFB8C7D1),
                 uncheckedBorderColor = Color(0xFFB8C7D1),
             ),
-        )
-    }
-}
-
-@Composable
-private fun SettingPreviewRow(
-    label: String,
-    value: String,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(text = label, color = Color(0xFF31485B))
-        Text(
-            text = value,
-            color = Color(0xFF116DAE),
-            fontWeight = FontWeight.SemiBold,
         )
     }
 }
@@ -2045,9 +2180,16 @@ private fun buildPaceStatus(
     actualMl: Int,
     now: LocalTime,
     dailyGoalMl: Int,
+    wakeTimeMinutes: Int,
+    bedTimeMinutes: Int,
 ): PaceStatus {
-    val target = paceTargets.lastOrNull { !now.isBefore(it.time) } ?: paceTargets.first()
-    val expectedMl = scaleForDailyGoal(target.expectedMl, dailyGoalMl)
+    val currentTimeMinutes = now.hour * 60 + now.minute
+    val expectedMl = expectedIntakeForTime(
+        currentTimeMinutes = currentTimeMinutes,
+        wakeTimeMinutes = wakeTimeMinutes,
+        bedTimeMinutes = bedTimeMinutes,
+        dailyGoalMl = dailyGoalMl,
+    )
     val remainingMl = (expectedMl - actualMl).coerceAtLeast(0)
     val state = when {
         actualMl >= expectedMl -> PaceState.OnTrack
@@ -2057,7 +2199,7 @@ private fun buildPaceStatus(
     }
 
     return PaceStatus(
-        targetTimeLabel = target.time.format(DateTimeFormatter.ofPattern("H:mm")),
+        targetTimeLabel = now.format(DateTimeFormatter.ofPattern("H:mm")),
         expectedMl = expectedMl,
         actualMl = actualMl,
         remainingMl = remainingMl,
@@ -2078,6 +2220,9 @@ private fun buildPaceStatus(
         },
     )
 }
+
+private fun formatTimeMinutes(minutes: Int): String =
+    "%02d:%02d".format(Locale.JAPAN, minutes / 60, minutes % 60)
 
 private fun buildVoiceRecognitionIntent(): Intent =
     Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -2193,16 +2338,6 @@ private fun buildDrinkNotices(
     }
 }
 
-private val paceTargets = listOf(
-    PaceTarget(time = LocalTime.of(8, 0), expectedMl = 0),
-    PaceTarget(time = LocalTime.of(10, 0), expectedMl = 300),
-    PaceTarget(time = LocalTime.of(12, 0), expectedMl = 700),
-    PaceTarget(time = LocalTime.of(15, 0), expectedMl = 1100),
-    PaceTarget(time = LocalTime.of(18, 0), expectedMl = 1500),
-    PaceTarget(time = LocalTime.of(21, 0), expectedMl = 1900),
-    PaceTarget(time = LocalTime.of(22, 0), expectedMl = 2000),
-)
-
 private data class DrinkSummary(
     val drinkType: String,
     val amountMl: Int,
@@ -2240,11 +2375,6 @@ private data class DailyIntake(
     val dayLabel: String,
     val amountMl: Int,
     val isToday: Boolean,
-)
-
-private data class PaceTarget(
-    val time: LocalTime,
-    val expectedMl: Int,
 )
 
 private data class PaceStatus(
@@ -2295,11 +2425,15 @@ private fun MizunomiAppPreview() {
         ),
         reminderEnabled = true,
         dailyGoalMl = DefaultDailyGoalMl,
+        wakeTimeMinutes = DefaultWakeTimeMinutes,
+        bedTimeMinutes = DefaultBedTimeMinutes,
         onAddRecord = { _, amountMl, _, _, onSaved -> onSaved(400 + amountMl) },
         onUpdateRecord = { _, _, _ -> },
         onDeleteRecord = {},
         onReminderEnabledChange = {},
         onDailyGoalChange = {},
+        onWakeTimeChange = {},
+        onBedTimeChange = {},
         onPrepareCsvExport = { onReady, _ -> onReady("date,time,drinkType,amountMl,memo\n") },
     )
 }
