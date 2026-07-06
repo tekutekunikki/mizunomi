@@ -19,6 +19,8 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 )
 
 internal const val DefaultDailyGoalMl = 2000
+internal const val DefaultWakeTimeMinutes = 8 * 60
+internal const val DefaultBedTimeMinutes = 23 * 60
 internal val DailyGoalOptionsMl = listOf(1500, 2000, 2500, 3000)
 
 internal fun scaleForDailyGoal(
@@ -27,6 +29,24 @@ internal fun scaleForDailyGoal(
 ): Int = ((baselineMl.toLong() * dailyGoalMl) + DefaultDailyGoalMl / 2)
     .div(DefaultDailyGoalMl)
     .toInt()
+
+internal fun expectedIntakeForTime(
+    currentTimeMinutes: Int,
+    wakeTimeMinutes: Int,
+    bedTimeMinutes: Int,
+    dailyGoalMl: Int,
+): Int = when {
+    bedTimeMinutes <= wakeTimeMinutes -> 0
+    currentTimeMinutes <= wakeTimeMinutes -> 0
+    currentTimeMinutes >= bedTimeMinutes -> dailyGoalMl
+    else -> {
+        val elapsedMinutes = currentTimeMinutes - wakeTimeMinutes
+        val activeMinutes = bedTimeMinutes - wakeTimeMinutes
+        ((dailyGoalMl.toLong() * elapsedMinutes) + activeMinutes / 2)
+            .div(activeMinutes)
+            .toInt()
+    }
+}
 
 class ReminderSettingsRepository(context: Context) {
     private val dataStore = context.applicationContext.settingsDataStore
@@ -55,6 +75,26 @@ class ReminderSettingsRepository(context: Context) {
                 ?: DefaultDailyGoalMl
         }
 
+    val wakeTimeMinutes: Flow<Int> = dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { preferences ->
+            preferences[WakeTimeMinutesKey]
+                ?.takeIf { it in 0 until 24 * 60 }
+                ?: DefaultWakeTimeMinutes
+        }
+
+    val bedTimeMinutes: Flow<Int> = dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { preferences ->
+            preferences[BedTimeMinutesKey]
+                ?.takeIf { it in 0 until 24 * 60 }
+                ?: DefaultBedTimeMinutes
+        }
+
     suspend fun setReminderEnabled(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[ReminderEnabledKey] = enabled
@@ -74,8 +114,26 @@ class ReminderSettingsRepository(context: Context) {
 
     suspend fun getDailyGoalMl(): Int = dailyGoalMl.first()
 
+    suspend fun setWakeTimeMinutes(minutes: Int) {
+        require(minutes in 0 until 24 * 60)
+        require(minutes < getBedTimeMinutes())
+        dataStore.edit { preferences -> preferences[WakeTimeMinutesKey] = minutes }
+    }
+
+    suspend fun setBedTimeMinutes(minutes: Int) {
+        require(minutes in 0 until 24 * 60)
+        require(minutes > getWakeTimeMinutes())
+        dataStore.edit { preferences -> preferences[BedTimeMinutesKey] = minutes }
+    }
+
+    suspend fun getWakeTimeMinutes(): Int = wakeTimeMinutes.first()
+
+    suspend fun getBedTimeMinutes(): Int = bedTimeMinutes.first()
+
     private companion object {
         val ReminderEnabledKey = booleanPreferencesKey("reminderEnabled")
         val DailyGoalMlKey = intPreferencesKey("dailyGoalMl")
+        val WakeTimeMinutesKey = intPreferencesKey("wakeTimeMinutes")
+        val BedTimeMinutesKey = intPreferencesKey("bedTimeMinutes")
     }
 }

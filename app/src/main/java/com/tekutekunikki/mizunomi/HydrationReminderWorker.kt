@@ -30,6 +30,12 @@ class HydrationReminderWorker(
             return Result.success()
         }
         val dailyGoalMl = settingsRepository.getDailyGoalMl()
+        val wakeTimeMinutes = settingsRepository.getWakeTimeMinutes()
+        val bedTimeMinutes = settingsRepository.getBedTimeMinutes()
+        val currentTimeMinutes = now.hour * 60 + now.minute
+        if (currentTimeMinutes < wakeTimeMinutes || currentTimeMinutes >= bedTimeMinutes) {
+            return Result.success()
+        }
 
         HydrationReminderNotifications.createChannel(applicationContext)
 
@@ -38,8 +44,10 @@ class HydrationReminderWorker(
         )
         val today = now.toLocalDate()
         val todayTotalMl = repository.getTotalAmountForDay(today)
-        val expectedMl = scaleForDailyGoal(
-            baselineMl = expectedMlByCheckHour.getValue(checkHour),
+        val expectedMl = expectedIntakeForTime(
+            currentTimeMinutes = currentTimeMinutes,
+            wakeTimeMinutes = wakeTimeMinutes,
+            bedTimeMinutes = bedTimeMinutes,
             dailyGoalMl = dailyGoalMl,
         )
         val shortageMl = expectedMl - todayTotalMl
