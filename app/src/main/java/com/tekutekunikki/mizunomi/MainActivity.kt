@@ -17,10 +17,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -1637,6 +1639,9 @@ private fun WeeklyTrendCard(
     dailyGoalMl: Int,
 ) {
     val maxBarAmount = maxOf(dailyGoalMl, days.maxOfOrNull { it.amountMl } ?: 0)
+    val weeklyTotalMl = days.sumOf { it.amountMl }
+    val dailyAverageMl = if (days.isEmpty()) 0 else weeklyTotalMl / days.size
+    val numberFormat = remember { NumberFormat.getNumberInstance(Locale.JAPAN) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1649,80 +1654,148 @@ private fun WeeklyTrendCard(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "7-day trend",
+                text = "\u4ECA\u9031\u306E\u6C34\u5206\u6442\u53D6",
                 color = Color(0xFF25384A),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            days.forEach { day ->
-                TrendBarRow(
-                    day = day,
-                    maxBarAmount = maxBarAmount,
-                    dailyGoalMl = dailyGoalMl,
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+            ) {
+                WeeklyMetric(
+                    label = "\u5408\u8A08",
+                    value = "${numberFormat.format(weeklyTotalMl)}ml",
+                    modifier = Modifier.weight(1f),
                 )
+                WeeklyMetric(
+                    label = "\u5E73\u5747",
+                    value = "${numberFormat.format(dailyAverageMl)}ml/\u65E5",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Text(
+                text = "\u76EE\u6A19 ${numberFormat.format(dailyGoalMl)}ml/\u65E5",
+                color = Color(0xFF5C6F7E),
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(190.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                days.forEach { day ->
+                    WeeklyBarColumn(
+                        day = day,
+                        maxBarAmount = maxBarAmount,
+                        dailyGoalMl = dailyGoalMl,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TrendBarRow(
+private fun WeeklyMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            color = Color(0xFF6C7A86),
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Text(
+            text = value,
+            color = Color(0xFF17324A),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun WeeklyBarColumn(
     day: DailyIntake,
     maxBarAmount: Int,
     dailyGoalMl: Int,
+    modifier: Modifier = Modifier,
 ) {
-    val progress = (day.amountMl.toFloat() / maxBarAmount).coerceIn(0f, 1f)
+    val progress = if (maxBarAmount == 0) {
+        0f
+    } else {
+        (day.amountMl.toFloat() / maxBarAmount).coerceIn(0f, 1f)
+    }
     val barColor = when {
         day.amountMl >= dailyGoalMl -> Color(0xFF2EAD5B)
         day.isToday -> Color(0xFF1683D8)
         else -> Color(0xFF76B9E8)
     }
+    val labelColor = if (day.isToday) Color(0xFF0F6FAE) else Color(0xFF6C7A86)
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        modifier = modifier.fillMaxHeight(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Column(
-            modifier = Modifier.width(52.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Text(
+            text = if (day.isToday) "\u4ECA\u65E5" else "",
+            color = Color(0xFF0F6FAE),
+            fontWeight = FontWeight.Bold,
+            fontSize = 10.sp,
+            maxLines = 1,
+        )
+        Text(
+            text = day.amountMl.toString(),
+            color = if (day.isToday) Color(0xFF17324A) else Color(0xFF5C6F7E),
+            fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
+            fontSize = 10.sp,
+            maxLines = 1,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .width(24.dp)
+                .background(
+                    color = Color(0xFFEAF2F7),
+                    shape = RoundedCornerShape(8.dp),
+                ),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            Text(
-                text = day.dayLabel,
-                color = if (day.isToday) Color(0xFF0F6FAE) else Color(0xFF6C7A86),
-                fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Normal,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = day.dateLabel,
-                color = if (day.isToday) Color(0xFF0F6FAE) else Color(0xFF6C7A86),
-                fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Normal,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-            )
-            if (day.amountMl >= dailyGoalMl) {
-                Text(
-                    text = "\u2713",
-                    color = Color(0xFF168344),
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodySmall,
+            if (progress > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(progress)
+                        .background(
+                            color = barColor,
+                            shape = RoundedCornerShape(8.dp),
+                        ),
                 )
             }
         }
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .weight(1f)
-                .heightIn(min = 12.dp),
-            color = barColor,
-            trackColor = Color(0xFFE5EEF5),
+        Text(
+            text = day.dayLabel,
+            color = labelColor,
+            fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Normal,
+            style = MaterialTheme.typography.labelMedium,
         )
         Text(
-            text = "${day.amountMl} ml",
-            modifier = Modifier.width(72.dp),
-            color = if (day.isToday) Color(0xFF0F2F47) else Color(0xFF31485B),
-            fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.SemiBold,
-            style = MaterialTheme.typography.bodySmall,
+            text = day.dateLabel,
+            color = labelColor,
+            fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Normal,
+            fontSize = 10.sp,
+            maxLines = 1,
         )
     }
 }
