@@ -70,13 +70,15 @@ import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
 import com.tekutekunikki.mizunomi.data.MizunomiDatabase
 import com.tekutekunikki.mizunomi.data.buildIntakeRecordsCsv
 import java.text.NumberFormat
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
-import java.time.format.TextStyle
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -87,6 +89,7 @@ private const val PastRecordLimitDays = 30L
 private const val SweetDrinkWarningThresholdMl = 500
 private const val BalancedDrinkTotalThresholdMl = 1000
 private const val WaterTeaMinimumThresholdMl = 500
+private val MonthDayFormatter = DateTimeFormatter.ofPattern("M/d", Locale.JAPAN)
 
 private data class RecordFeedback(
     val drinkType: String,
@@ -176,6 +179,8 @@ fun MizunomiApp(
         .collectAsState(initial = emptyList())
     val recentRecords by repository.observeRecentRecords(PastRecordLimitDays + 1)
         .collectAsState(initial = emptyList())
+    val weeklyRecords by repository.observeRecordsForWeekContaining(LocalDate.now())
+        .collectAsState(initial = emptyList())
     val reminderEnabled by reminderSettingsRepository.reminderEnabled
         .collectAsState(initial = true)
     val dailyGoalMl by reminderSettingsRepository.dailyGoalMl
@@ -190,6 +195,7 @@ fun MizunomiApp(
         todayTotalMl = todayTotalMl,
         todayRecords = todayRecords,
         recentRecords = recentRecords,
+        weeklyRecords = weeklyRecords,
         reminderEnabled = reminderEnabled,
         dailyGoalMl = dailyGoalMl,
         wakeTimeMinutes = wakeTimeMinutes,
@@ -253,6 +259,7 @@ fun MizunomiAppContent(
     todayTotalMl: Int,
     todayRecords: List<IntakeRecord>,
     recentRecords: List<IntakeRecord>,
+    weeklyRecords: List<IntakeRecord>,
     reminderEnabled: Boolean,
     dailyGoalMl: Int,
     wakeTimeMinutes: Int,
@@ -366,8 +373,8 @@ fun MizunomiAppContent(
         wakeTimeMinutes = wakeTimeMinutes,
         bedTimeMinutes = bedTimeMinutes,
     )
-    val weeklyTrend = remember(recentRecords) {
-        buildWeeklyTrend(recentRecords)
+    val weeklyTrend = remember(weeklyRecords) {
+        buildWeeklyTrend(weeklyRecords)
     }
     val drinkNotices = remember(todayRecords, todayTotalMl) {
         buildDrinkNotices(todayRecords, todayTotalMl)
@@ -1677,7 +1684,7 @@ private fun TrendBarRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(
-            modifier = Modifier.width(42.dp),
+            modifier = Modifier.width(52.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -1685,6 +1692,13 @@ private fun TrendBarRow(
                 color = if (day.isToday) Color(0xFF0F6FAE) else Color(0xFF6C7A86),
                 fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Normal,
                 style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = day.dateLabel,
+                color = if (day.isToday) Color(0xFF0F6FAE) else Color(0xFF6C7A86),
+                fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Normal,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
             )
             if (day.amountMl >= dailyGoalMl) {
                 Text(
@@ -2157,6 +2171,7 @@ private fun validateRecordDateTime(
 private fun buildWeeklyTrend(records: List<IntakeRecord>): List<DailyIntake> {
     val zoneId = ZoneId.systemDefault()
     val today = LocalDate.now()
+    val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
     val totalsByDate = records.groupBy {
         Instant.ofEpochMilli(it.timestamp)
             .atZone(zoneId)
@@ -2165,11 +2180,12 @@ private fun buildWeeklyTrend(records: List<IntakeRecord>): List<DailyIntake> {
         dayRecords.sumOf { it.amountMl }
     }
 
-    return (WeeklyTrendDays - 1 downTo 0).map { daysAgo ->
-        val date = today.minusDays(daysAgo)
+    return (0L until WeeklyTrendDays).map { dayOffset ->
+        val date = weekStart.plusDays(dayOffset)
         DailyIntake(
             date = date,
             dayLabel = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.JAPAN),
+            dateLabel = date.format(MonthDayFormatter),
             amountMl = totalsByDate[date] ?: 0,
             isToday = date == today,
         )
@@ -2373,6 +2389,7 @@ private enum class AppTab(
 private data class DailyIntake(
     val date: LocalDate,
     val dayLabel: String,
+    val dateLabel: String,
     val amountMl: Int,
     val isToday: Boolean,
 )
@@ -2415,6 +2432,15 @@ private fun MizunomiAppPreview() {
             ),
         ),
         recentRecords = listOf(
+            IntakeRecord(
+                id = 1,
+                drinkType = "\u6C34",
+                amountMl = 200,
+                timestamp = 0,
+                memo = null,
+            ),
+        ),
+        weeklyRecords = listOf(
             IntakeRecord(
                 id = 1,
                 drinkType = "\u6C34",

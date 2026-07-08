@@ -1,8 +1,10 @@
 package com.tekutekunikki.mizunomi.data
 
 import java.time.Clock
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.flow.Flow
 
 class IntakeRecordRepository(
@@ -21,6 +23,13 @@ class IntakeRecordRepository(
         val startDate = LocalDate.now(clock).minusDays(days - 1)
         val startMillis = startDate.atStartOfDay(clock.zone).toInstant().toEpochMilli()
         val endMillis = startDate.plusDays(days).atStartOfDay(clock.zone).toInstant().toEpochMilli()
+        return dao.observeRecordsForRange(startMillis, endMillis)
+    }
+
+    fun observeRecordsForWeekContaining(date: LocalDate): Flow<List<IntakeRecord>> {
+        val weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val startMillis = weekStart.atStartOfDay(clock.zone).toInstant().toEpochMilli()
+        val endMillis = weekStart.plusWeeks(1).atStartOfDay(clock.zone).toInstant().toEpochMilli()
         return dao.observeRecordsForRange(startMillis, endMillis)
     }
 
