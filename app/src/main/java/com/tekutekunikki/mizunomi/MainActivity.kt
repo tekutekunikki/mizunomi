@@ -122,6 +122,23 @@ private val DrinkTypes = listOf(
     "\u305D\u306E\u4ED6",
 )
 
+private val DrinkTypeIcons = mapOf(
+    "\u6C34" to "\uD83D\uDCA7",
+    "\u304A\u8336" to "\uD83C\uDF75",
+    "\u30B3\u30FC\u30D2\u30FC" to "\u2615",
+    "\u30B8\u30E5\u30FC\u30B9" to "\uD83E\uDDC3",
+    "\u30B9\u30DD\u30FC\u30C4\u30C9\u30EA\u30F3\u30AF" to "\uD83C\uDFC3",
+    "\u4E73\u98F2\u6599" to "\uD83E\uDD5B",
+    "\u70AD\u9178\u98F2\u6599" to "\uD83E\uDEE7",
+    "\u30A2\u30EB\u30B3\u30FC\u30EB" to "\uD83C\uDF7A",
+    "\u305D\u306E\u4ED6" to "\uD83E\uDD64",
+)
+
+private const val DefaultDrinkTypeIcon = "\uD83E\uDD64"
+
+private fun drinkTypeDisplayLabel(drinkType: String): String =
+    "${DrinkTypeIcons[drinkType] ?: DefaultDrinkTypeIcon} $drinkType"
+
 private val SweetDrinkTypes = setOf(
     "\u30B8\u30E5\u30FC\u30B9",
     "\u30B9\u30DD\u30FC\u30C4\u30C9\u30EA\u30F3\u30AF",
@@ -706,7 +723,7 @@ private fun RecordFeedbackCard(
                         append(feedback.recordedAt.format(dateTimeFormatter))
                         append(" に ")
                     }
-                    append(feedback.drinkType)
+                    append(drinkTypeDisplayLabel(feedback.drinkType))
                     append(' ')
                     append(numberFormat.format(feedback.amountMl))
                     append("ml")
@@ -1320,7 +1337,7 @@ private fun VoiceIntakeDialog(
 
                 if (state.candidate != null && !isEditing) {
                     Text(
-                        text = "${state.candidate.drinkType} ${state.candidate.amountMl}ml \u3068\u3057\u3066\u8A18\u9332\u3057\u307E\u3059\u304B\uFF1F",
+                        text = "${drinkTypeDisplayLabel(state.candidate.drinkType)} ${state.candidate.amountMl}ml \u3068\u3057\u3066\u8A18\u9332\u3057\u307E\u3059\u304B\uFF1F",
                         color = Color(0xFF31485B),
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -1335,6 +1352,7 @@ private fun VoiceIntakeDialog(
                         values = drinkTypes,
                         selectedValue = selectedDrinkType,
                         onSelected = { selectedDrinkType = it },
+                        labelForValue = ::drinkTypeDisplayLabel,
                     )
                     AmountSelectionGrid(
                         amounts = correctionAmounts,
@@ -1510,6 +1528,7 @@ private fun EditRecordDialog(
                     values = drinkTypes,
                     selectedValue = selectedDrinkType,
                     onSelected = { selectedDrinkType = it },
+                    labelForValue = ::drinkTypeDisplayLabel,
                 )
                 AmountSelectionGrid(
                     amounts = amounts,
@@ -1546,7 +1565,7 @@ private fun DeleteRecordDialog(
         },
         text = {
             Text(
-                text = "${record.drinkType} ${record.amountMl} ml",
+                text = "${drinkTypeDisplayLabel(record.drinkType)} ${record.amountMl} ml",
                 color = Color(0xFF31485B),
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1930,7 +1949,7 @@ private fun TypeSummaryCard(summaries: List<DrinkSummary>) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = summary.drinkType,
+                        text = drinkTypeDisplayLabel(summary.drinkType),
                         color = Color(0xFF31485B),
                         fontWeight = FontWeight.Medium,
                     )
@@ -1999,6 +2018,7 @@ private fun AddIntakeCard(
                 values = drinkTypes,
                 selectedValue = selectedDrinkType,
                 onSelected = onDrinkTypeSelected,
+                labelForValue = ::drinkTypeDisplayLabel,
             )
             QuickAmountGrid(
                 amounts = amounts,
@@ -2149,6 +2169,7 @@ private fun ChoiceRow(
     values: List<String>,
     selectedValue: String,
     onSelected: (String) -> Unit,
+    labelForValue: (String) -> String = { it },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         values.chunked(2).forEach { rowValues ->
@@ -2158,7 +2179,7 @@ private fun ChoiceRow(
             ) {
                 rowValues.forEach { value ->
                     SelectButton(
-                        text = value,
+                        text = labelForValue(value),
                         selected = selectedValue == value,
                         modifier = Modifier.weight(1f),
                         onClick = { onSelected(value) },
@@ -2283,7 +2304,7 @@ private fun IntakeRecordRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = record.drinkType,
+                    text = drinkTypeDisplayLabel(record.drinkType),
                     color = Color(0xFF263B4D),
                     fontWeight = FontWeight.SemiBold,
                 )
