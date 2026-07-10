@@ -72,9 +72,16 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tekutekunikki.mizunomi.data.IntakeRecord
+import com.tekutekunikki.mizunomi.data.CsvImportException
+import com.tekutekunikki.mizunomi.data.CsvImportPreview
 import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
+import com.tekutekunikki.mizunomi.data.MaxCsvImportBytes
 import com.tekutekunikki.mizunomi.data.MizunomiDatabase
 import com.tekutekunikki.mizunomi.data.buildIntakeRecordsCsv
+import com.tekutekunikki.mizunomi.data.decodeUtf8Csv
+import com.tekutekunikki.mizunomi.data.parseIntakeRecordsCsv
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.text.NumberFormat
 import java.time.DayOfWeek
 import java.time.Instant
@@ -119,6 +126,18 @@ private sealed interface CsvExportStatus {
     data object InProgress : CsvExportStatus
     data object Success : CsvExportStatus
     data class Error(val message: String) : CsvExportStatus
+}
+
+private sealed interface CsvImportStatus {
+    data object InProgress : CsvImportStatus
+    data class Success(
+        val importedCount: Int,
+        val skippedCount: Int,
+        val duplicateCount: Int,
+        val unknownDrinkTypeCount: Int,
+    ) : CsvImportStatus
+
+    data class Error(val message: String) : CsvImportStatus
 }
 
 private val DrinkTypes = listOf(
@@ -336,6 +355,26 @@ fun MizunomiApp(
                     }
             }
         },
+        onAnalyzeCsvImport = { csvText, onReady, onError ->
+            scope.launch {
+                runCatching {
+                    val existingRecords = repository.getAllRecords()
+                    withContext(Dispatchers.Default) {
+                        parseIntakeRecordsCsv(csvText, existingRecords)
+                    }
+                }.onSuccess(onReady)
+                    .onFailure { error ->
+                        onError(error.message ?: "CSVファイルを解析できませんでした")
+                    }
+            }
+        },
+        onImportCsvRecords = { records, onSuccess, onError ->
+            scope.launch {
+                runCatching { repository.importRecords(records) }
+                    .onSuccess(onSuccess)
+                    .onFailure { onError("CSVデータを保存できませんでした") }
+            }
+        },
     )
 }
 
@@ -372,6 +411,16 @@ fun MizunomiAppContent(
         onReady: (csvContent: String) -> Unit,
         onError: (message: String) -> Unit,
     ) -> Unit,
+    onAnalyzeCsvImport: (
+        csvText: String,
+        onReady: (preview: CsvImportPreview) -> Unit,
+        onError: (message: String) -> Unit,
+    ) -> Unit,
+    onImportCsvRecords: (
+        records: List<IntakeRecord>,
+        onSuccess: (importedCount: Int) -> Unit,
+        onError: (message: String) -> Unit,
+    ) -> Unit,
 ) {
     val drinkTypes = DrinkTypes
     val amounts = listOf(100, 200, 300, 500)
@@ -386,6 +435,8 @@ fun MizunomiAppContent(
     var homeQuickRecordStatus by remember { mutableStateOf<HomeQuickRecordStatus?>(null) }
     var isHomeQuickRecordSaving by remember { mutableStateOf(false) }
     var csvExportStatus by remember { mutableStateOf<CsvExportStatus?>(null) }
+    var csvImportStatus by remember { mutableStateOf<CsvImportStatus?>(null) }
+    var pendingCsvImport by remember { mutableStateOf<CsvImportPreview?>(null) }
     var pendingCsvContent by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableStateOf(AppTab.Home) }
     val context = LocalContext.current
@@ -421,6 +472,48 @@ fun MizunomiAppContent(
                 }.onFailure {
                     csvExportStatus = CsvExportStatus.Error(
                         "CSVファイルを書き出せませんでした。保存先を確認してください。",
+                    )
+                }
+            }
+        }
+    }
+    val openCsvDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) {
+            csvImportStatus = null
+        } else {
+            uiScope.launch {
+                csvImportStatus = CsvImportStatus.InProgress
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                            if (descriptor.length > MaxCsvImportBytes) {
+                                throw CsvImportException("ファイルサイズが5MBを超えています")
+                            }
+                        }
+                        val bytes = requireNotNull(context.contentResolver.openInputStream(uri)) {
+                            "ファイルを開けませんでした"
+                        }.use { input -> input.readBytesWithLimit(MaxCsvImportBytes) }
+                        decodeUtf8Csv(bytes)
+                    }
+                }.onSuccess { csvText ->
+                    onAnalyzeCsvImport(
+                        csvText,
+                        { preview ->
+                            pendingCsvImport = preview
+                            csvImportStatus = null
+                        },
+                        { message ->
+                            csvImportStatus = CsvImportStatus.Error(
+                                "CSVファイルを読み込めませんでした\n理由: $message",
+                            )
+                        },
+                    )
+                }.onFailure { error ->
+                    csvImportStatus = CsvImportStatus.Error(
+                        "CSVファイルを読み込めませんでした\n理由: " +
+                            (error.message ?: "ファイルを開けませんでした"),
                     )
                 }
             }
@@ -517,6 +610,28 @@ fun MizunomiAppContent(
     }.filter { it.amountMl > 0 }
 
     MaterialTheme {
+        pendingCsvImport?.let { preview ->
+            CsvImportPreviewDialog(
+                preview = preview,
+                onDismiss = { pendingCsvImport = null },
+                onImport = {
+                    pendingCsvImport = null
+                    csvImportStatus = CsvImportStatus.InProgress
+                    onImportCsvRecords(
+                        preview.records,
+                        { importedCount ->
+                            csvImportStatus = CsvImportStatus.Success(
+                                importedCount = importedCount,
+                                skippedCount = preview.skippedRowCount,
+                                duplicateCount = preview.duplicateCount,
+                                unknownDrinkTypeCount = preview.unknownDrinkTypeCount,
+                            )
+                        },
+                        { message -> csvImportStatus = CsvImportStatus.Error(message) },
+                    )
+                },
+            )
+        }
         editingRecord?.let { record ->
             EditRecordDialog(
                 record = record,
@@ -651,6 +766,7 @@ fun MizunomiAppContent(
                     onWakeTimeChange = onWakeTimeChange,
                     onBedTimeChange = onBedTimeChange,
                     csvExportStatus = csvExportStatus,
+                    csvImportStatus = csvImportStatus,
                     onExportCsv = {
                         csvExportStatus = CsvExportStatus.InProgress
                         onPrepareCsvExport(
@@ -663,6 +779,12 @@ fun MizunomiAppContent(
                             { message ->
                                 csvExportStatus = CsvExportStatus.Error(message)
                             },
+                        )
+                    },
+                    onImportCsv = {
+                        csvImportStatus = CsvImportStatus.InProgress
+                        openCsvDocumentLauncher.launch(
+                            arrayOf("text/csv", "text/comma-separated-values", "text/plain"),
                         )
                     },
                 )
@@ -1028,7 +1150,9 @@ private fun SettingsTabContent(
     onWakeTimeChange: (Int) -> Unit,
     onBedTimeChange: (Int) -> Unit,
     csvExportStatus: CsvExportStatus?,
+    csvImportStatus: CsvImportStatus?,
     onExportCsv: () -> Unit,
+    onImportCsv: () -> Unit,
 ) {
     var showDailyGoalDialog by remember { mutableStateOf(false) }
     var lifestyleError by remember { mutableStateOf<String?>(null) }
@@ -1099,7 +1223,9 @@ private fun SettingsTabContent(
         item {
             DataManagementCard(
                 exportStatus = csvExportStatus,
+                importStatus = csvImportStatus,
                 onExportCsv = onExportCsv,
+                onImportCsv = onImportCsv,
             )
         }
     }
@@ -1289,8 +1415,12 @@ private fun TimeSettingRow(
 @Composable
 private fun DataManagementCard(
     exportStatus: CsvExportStatus?,
+    importStatus: CsvImportStatus?,
     onExportCsv: () -> Unit,
+    onImportCsv: () -> Unit,
 ) {
+    val isBusy = exportStatus is CsvExportStatus.InProgress ||
+        importStatus is CsvImportStatus.InProgress
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
@@ -1344,7 +1474,7 @@ private fun DataManagementCard(
             Button(
                 onClick = onExportCsv,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = exportStatus !is CsvExportStatus.InProgress,
+                enabled = !isBusy,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1683D8)),
                 shape = RoundedCornerShape(16.dp),
                 contentPadding = PaddingValues(vertical = 14.dp),
@@ -1354,6 +1484,22 @@ private fun DataManagementCard(
                         "CSVを準備しています…"
                     } else {
                         "データを書き出す（CSV）"
+                    },
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            OutlinedButton(
+                onClick = onImportCsv,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isBusy,
+                shape = RoundedCornerShape(16.dp),
+                contentPadding = PaddingValues(vertical = 14.dp),
+            ) {
+                Text(
+                    text = if (importStatus is CsvImportStatus.InProgress) {
+                        "CSVを確認しています…"
+                    } else {
+                        "データを読み込む（CSV）"
                     },
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -1375,7 +1521,119 @@ private fun DataManagementCard(
 
                 CsvExportStatus.InProgress, null -> Unit
             }
+            when (importStatus) {
+                is CsvImportStatus.Success -> Column(
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        text = "✓ ${importStatus.importedCount}件を読み込みました",
+                        color = Color(0xFF168344),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "${importStatus.skippedCount}件をスキップ（重複 ${importStatus.duplicateCount}件）",
+                        color = Color(0xFF526777),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (importStatus.unknownDrinkTypeCount > 0) {
+                        Text(
+                            text = "未知の飲み物 ${importStatus.unknownDrinkTypeCount}件を「その他」で読み込みました",
+                            color = Color(0xFF526777),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+
+                is CsvImportStatus.Error -> Text(
+                    text = importStatus.message,
+                    color = Color(0xFFB3261E),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                )
+
+                CsvImportStatus.InProgress, null -> Unit
+            }
         }
+    }
+}
+
+@Composable
+private fun CsvImportPreviewDialog(
+    preview: CsvImportPreview,
+    onDismiss: () -> Unit,
+    onImport: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "CSVを読み込みますか？") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 430.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                ImportPreviewCount("読み込み予定", preview.records.size)
+                ImportPreviewCount("スキップ予定", preview.skippedRowCount)
+                ImportPreviewCount("重複候補", preview.duplicateCount)
+                ImportPreviewCount("その他へ変換", preview.unknownDrinkTypeCount)
+                if (preview.errors.isNotEmpty()) {
+                    Text(
+                        text = "確認が必要な行",
+                        modifier = Modifier.padding(top = 8.dp),
+                        color = Color(0xFF25384A),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    preview.errors.forEach { error ->
+                        Text(
+                            text = "${error.rowNumber}行目: ${error.reason}",
+                            color = Color(0xFF8A5A00),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (preview.hiddenErrorCount > 0) {
+                        Text(
+                            text = "ほか${preview.hiddenErrorCount}件のエラーがあります",
+                            color = Color(0xFF8A5A00),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+                if (preview.records.isEmpty()) {
+                    Text(
+                        text = "読み込み可能な記録がありません。",
+                        color = Color(0xFFB3261E),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onImport,
+                enabled = preview.records.isNotEmpty(),
+            ) {
+                Text(text = "読み込む")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(text = "キャンセル") }
+        },
+    )
+}
+
+@Composable
+private fun ImportPreviewCount(
+    label: String,
+    count: Int,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(text = label, color = Color(0xFF526777))
+        Text(text = "$count 件", color = Color(0xFF173B2A), fontWeight = FontWeight.Bold)
     }
 }
 
@@ -2881,5 +3139,32 @@ private fun MizunomiAppPreview() {
         onBedTimeChange = {},
         onDisplayedWeekStartChange = {},
         onPrepareCsvExport = { onReady, _ -> onReady("date,time,drinkType,amountMl,memo\n") },
+        onAnalyzeCsvImport = { _, onReady, _ ->
+            onReady(
+                CsvImportPreview(
+                    records = emptyList(),
+                    skippedRowCount = 0,
+                    duplicateCount = 0,
+                    unknownDrinkTypeCount = 0,
+                    totalErrorCount = 0,
+                    errors = emptyList(),
+                ),
+            )
+        },
+        onImportCsvRecords = { records, onSuccess, _ -> onSuccess(records.size) },
     )
+}
+
+private fun InputStream.readBytesWithLimit(maxBytes: Int): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (true) {
+        val read = read(buffer)
+        if (read < 0) break
+        if (output.size() + read > maxBytes) {
+            throw CsvImportException("ファイルサイズが5MBを超えています")
+        }
+        output.write(buffer, 0, read)
+    }
+    return output.toByteArray()
 }
