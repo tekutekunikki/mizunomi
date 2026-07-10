@@ -53,6 +53,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -168,6 +169,8 @@ private val HomeQuickRecordOptions = listOf(
 )
 
 class MainActivity : ComponentActivity() {
+    private val currentDateState = mutableStateOf(LocalDate.now())
+
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
@@ -192,8 +195,19 @@ class MainActivity : ComponentActivity() {
             MizunomiApp(
                 repository = repository,
                 reminderSettingsRepository = reminderSettingsRepository,
+                currentDate = currentDateState.value,
+                onRefreshCurrentDate = ::refreshCurrentDate,
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshCurrentDate()
+    }
+
+    private fun refreshCurrentDate() {
+        currentDateState.value = LocalDate.now()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -211,15 +225,28 @@ class MainActivity : ComponentActivity() {
 fun MizunomiApp(
     repository: IntakeRecordRepository,
     reminderSettingsRepository: ReminderSettingsRepository,
+    currentDate: LocalDate,
+    onRefreshCurrentDate: () -> Unit,
 ) {
-    val todayTotalMl by repository.observeTotalAmountForDay(LocalDate.now())
+    val todayTotalMl by key(currentDate) {
+        repository.observeTotalAmountForDay(currentDate)
+    }
         .collectAsState(initial = 0)
-    val todayRecords by repository.observeTodayRecords()
+    val todayRecords by key(currentDate) {
+        repository.observeRecordsForDay(currentDate)
+    }
         .collectAsState(initial = emptyList())
-    val recentRecords by repository.observeRecentRecords(PastRecordLimitDays + 1)
+    val recentRecords by key(currentDate) {
+        repository.observeRecentRecords(PastRecordLimitDays + 1)
+    }
         .collectAsState(initial = emptyList())
-    val currentWeekStart = remember { LocalDate.now().startOfWeek() }
+    val currentWeekStart = remember(currentDate) { currentDate.startOfWeek() }
     var displayedWeekStart by remember { mutableStateOf(currentWeekStart) }
+    LaunchedEffect(currentWeekStart) {
+        if (displayedWeekStart.isAfter(currentWeekStart)) {
+            displayedWeekStart = currentWeekStart
+        }
+    }
     val weeklyRecords by key(displayedWeekStart) {
         repository.observeRecordsForWeekContaining(displayedWeekStart)
             .collectAsState(initial = emptyList())
@@ -245,6 +272,8 @@ fun MizunomiApp(
         dailyGoalMl = dailyGoalMl,
         wakeTimeMinutes = wakeTimeMinutes,
         bedTimeMinutes = bedTimeMinutes,
+        currentDate = currentDate,
+        onRefreshCurrentDate = onRefreshCurrentDate,
         onAddRecord = { drinkType, amountMl, timestamp, recordDate, onSaved, onError ->
             scope.launch {
                 try {
@@ -291,6 +320,7 @@ fun MizunomiApp(
             scope.launch { reminderSettingsRepository.setBedTimeMinutes(minutes) }
         },
         onDisplayedWeekStartChange = { requestedWeekStart ->
+            onRefreshCurrentDate()
             val normalizedWeekStart = requestedWeekStart.startOfWeek()
             if (!normalizedWeekStart.isAfter(currentWeekStart)) {
                 displayedWeekStart = normalizedWeekStart
@@ -321,6 +351,8 @@ fun MizunomiAppContent(
     dailyGoalMl: Int,
     wakeTimeMinutes: Int,
     bedTimeMinutes: Int,
+    currentDate: LocalDate,
+    onRefreshCurrentDate: () -> Unit,
     onAddRecord: (
         drinkType: String,
         amountMl: Int,
@@ -358,6 +390,11 @@ fun MizunomiAppContent(
     var selectedTab by remember { mutableStateOf(AppTab.Home) }
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
+    LaunchedEffect(selectedTab, currentDate) {
+        if (selectedTab == AppTab.Home) {
+            onRefreshCurrentDate()
+        }
+    }
     val createCsvDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/csv"),
     ) { uri ->
@@ -390,6 +427,7 @@ fun MizunomiAppContent(
         }
     }
     val addRecordWithFeedback = { drinkType: String, amountMl: Int ->
+        onRefreshCurrentDate()
         val now = LocalDateTime.now()
         val recordDateTime = LocalDateTime.of(
             selectedRecordDate,
@@ -419,6 +457,7 @@ fun MizunomiAppContent(
     }
     val addHomeQuickRecord = { option: HomeQuickRecordOption ->
         if (!isHomeQuickRecordSaving) {
+            onRefreshCurrentDate()
             val recordDateTime = LocalDateTime.now().withSecond(0).withNano(0)
             isHomeQuickRecordSaving = true
             homeQuickRecordStatus = null
@@ -485,6 +524,7 @@ fun MizunomiAppContent(
                 amounts = amounts,
                 onDismiss = { editingRecord = null },
                 onSave = { drinkType, amountMl ->
+                    onRefreshCurrentDate()
                     onUpdateRecord(record, drinkType, amountMl)
                     editingRecord = null
                 },
@@ -496,6 +536,7 @@ fun MizunomiAppContent(
                 record = record,
                 onDismiss = { deletingRecord = null },
                 onConfirmDelete = {
+                    onRefreshCurrentDate()
                     onDeleteRecord(record)
                     deletingRecord = null
                 },
@@ -522,7 +563,10 @@ fun MizunomiAppContent(
             bottomBar = {
                 MizunomiBottomBar(
                     selectedTab = selectedTab,
-                    onTabSelected = { selectedTab = it },
+                    onTabSelected = { tab ->
+                        onRefreshCurrentDate()
+                        selectedTab = tab
+                    },
                 )
             },
         ) { innerPadding ->
@@ -2826,6 +2870,8 @@ private fun MizunomiAppPreview() {
         dailyGoalMl = DefaultDailyGoalMl,
         wakeTimeMinutes = DefaultWakeTimeMinutes,
         bedTimeMinutes = DefaultBedTimeMinutes,
+        currentDate = LocalDate.now(),
+        onRefreshCurrentDate = {},
         onAddRecord = { _, amountMl, _, _, onSaved, _ -> onSaved(400 + amountMl) },
         onUpdateRecord = { _, _, _ -> },
         onDeleteRecord = {},
