@@ -104,6 +104,16 @@ private data class RecordFeedback(
     val dayTotalMl: Int,
 )
 
+private data class HomeQuickRecordOption(
+    val drinkType: String,
+    val amountMl: Int,
+)
+
+private sealed interface HomeQuickRecordStatus {
+    data class Success(val drinkType: String, val amountMl: Int) : HomeQuickRecordStatus
+    data object Error : HomeQuickRecordStatus
+}
+
 private sealed interface CsvExportStatus {
     data object InProgress : CsvExportStatus
     data object Success : CsvExportStatus
@@ -149,6 +159,12 @@ private val SweetDrinkTypes = setOf(
 private val WaterTeaDrinkTypes = setOf(
     "\u6C34",
     "\u304A\u8336",
+)
+
+private val HomeQuickRecordOptions = listOf(
+    HomeQuickRecordOption(drinkType = "\u6C34", amountMl = 100),
+    HomeQuickRecordOption(drinkType = "\u304A\u8336", amountMl = 100),
+    HomeQuickRecordOption(drinkType = "\u30B3\u30FC\u30D2\u30FC", amountMl = 200),
 )
 
 class MainActivity : ComponentActivity() {
@@ -229,14 +245,18 @@ fun MizunomiApp(
         dailyGoalMl = dailyGoalMl,
         wakeTimeMinutes = wakeTimeMinutes,
         bedTimeMinutes = bedTimeMinutes,
-        onAddRecord = { drinkType, amountMl, timestamp, recordDate, onSaved ->
+        onAddRecord = { drinkType, amountMl, timestamp, recordDate, onSaved, onError ->
             scope.launch {
-                repository.addRecord(
-                    drinkType = drinkType,
-                    amountMl = amountMl,
-                    timestamp = timestamp,
-                )
-                onSaved(repository.getTotalAmountForDay(recordDate))
+                try {
+                    repository.addRecord(
+                        drinkType = drinkType,
+                        amountMl = amountMl,
+                        timestamp = timestamp,
+                    )
+                    onSaved(repository.getTotalAmountForDay(recordDate))
+                } catch (exception: Exception) {
+                    onError()
+                }
             }
         },
         onUpdateRecord = { record, drinkType, amountMl ->
@@ -307,6 +327,7 @@ fun MizunomiAppContent(
         timestamp: Long,
         recordDate: LocalDate,
         onSaved: (dayTotalMl: Int) -> Unit,
+        onError: () -> Unit,
     ) -> Unit,
     onUpdateRecord: (record: IntakeRecord, drinkType: String, amountMl: Int) -> Unit,
     onDeleteRecord: (record: IntakeRecord) -> Unit,
@@ -330,6 +351,8 @@ fun MizunomiAppContent(
     var selectedRecordDate by remember { mutableStateOf(LocalDate.now()) }
     var selectedRecordTime by remember { mutableStateOf<LocalTime?>(null) }
     var recordDateTimeError by remember { mutableStateOf<String?>(null) }
+    var homeQuickRecordStatus by remember { mutableStateOf<HomeQuickRecordStatus?>(null) }
+    var isHomeQuickRecordSaving by remember { mutableStateOf(false) }
     var csvExportStatus by remember { mutableStateOf<CsvExportStatus?>(null) }
     var pendingCsvContent by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableStateOf(AppTab.Home) }
@@ -380,14 +403,42 @@ fun MizunomiAppContent(
                 amountMl,
                 recordDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                 recordDateTime.toLocalDate(),
-            ) { updatedDayTotalMl ->
-                recordFeedback = RecordFeedback(
-                    drinkType = drinkType,
-                    amountMl = amountMl,
-                    recordedAt = recordDateTime,
-                    dayTotalMl = updatedDayTotalMl,
-                )
-            }
+                { updatedDayTotalMl ->
+                    recordFeedback = RecordFeedback(
+                        drinkType = drinkType,
+                        amountMl = amountMl,
+                        recordedAt = recordDateTime,
+                        dayTotalMl = updatedDayTotalMl,
+                    )
+                },
+                {
+                    recordDateTimeError = "\u8A18\u9332\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044"
+                },
+            )
+        }
+    }
+    val addHomeQuickRecord = { option: HomeQuickRecordOption ->
+        if (!isHomeQuickRecordSaving) {
+            val recordDateTime = LocalDateTime.now().withSecond(0).withNano(0)
+            isHomeQuickRecordSaving = true
+            homeQuickRecordStatus = null
+            onAddRecord(
+                option.drinkType,
+                option.amountMl,
+                recordDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                recordDateTime.toLocalDate(),
+                {
+                    isHomeQuickRecordSaving = false
+                    homeQuickRecordStatus = HomeQuickRecordStatus.Success(
+                        drinkType = option.drinkType,
+                        amountMl = option.amountMl,
+                    )
+                },
+                {
+                    isHomeQuickRecordSaving = false
+                    homeQuickRecordStatus = HomeQuickRecordStatus.Error
+                },
+            )
         }
     }
     val voiceInputLauncher = rememberLauncherForActivityResult(
@@ -486,6 +537,11 @@ fun MizunomiAppContent(
                     dailyGoalMl = dailyGoalMl,
                     paceStatus = paceStatus,
                     drinkNotices = drinkNotices,
+                    quickRecordOptions = HomeQuickRecordOptions,
+                    quickRecordStatus = homeQuickRecordStatus,
+                    isQuickRecordSaving = isHomeQuickRecordSaving,
+                    onQuickRecord = addHomeQuickRecord,
+                    onGoToRecordTab = { selectedTab = AppTab.Record },
                 )
 
                 AppTab.Record -> RecordTabContent(
@@ -622,6 +678,11 @@ private fun HomeTabContent(
     dailyGoalMl: Int,
     paceStatus: PaceStatus,
     drinkNotices: List<DrinkNotice>,
+    quickRecordOptions: List<HomeQuickRecordOption>,
+    quickRecordStatus: HomeQuickRecordStatus?,
+    isQuickRecordSaving: Boolean,
+    onQuickRecord: (HomeQuickRecordOption) -> Unit,
+    onGoToRecordTab: () -> Unit,
 ) {
     MizunomiTabList(contentPadding = contentPadding) {
         item { TabHeader(title = "mizunomi", subtitle = "今日の水分バランス") }
@@ -636,8 +697,113 @@ private fun HomeTabContent(
             )
         }
         item { PaceStatusCard(status = paceStatus) }
+        item {
+            HomeQuickRecordCard(
+                options = quickRecordOptions,
+                status = quickRecordStatus,
+                isSaving = isQuickRecordSaving,
+                onQuickRecord = onQuickRecord,
+                onGoToRecordTab = onGoToRecordTab,
+            )
+        }
         if (drinkNotices.isNotEmpty()) {
             item { DrinkNoticeCard(notices = drinkNotices) }
+        }
+    }
+}
+
+@Composable
+private fun HomeQuickRecordCard(
+    options: List<HomeQuickRecordOption>,
+    status: HomeQuickRecordStatus?,
+    isSaving: Boolean,
+    onQuickRecord: (HomeQuickRecordOption) -> Unit,
+    onGoToRecordTab: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "クイック記録",
+                        color = Color(0xFF25384A),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "よく使う記録をワンタップで追加",
+                        color = Color(0xFF6C7A86),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                TextButton(onClick = onGoToRecordTab) {
+                    Text(text = "詳細に記録する")
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                options.forEach { option ->
+                    OutlinedButton(
+                        onClick = { onQuickRecord(option) },
+                        enabled = !isSaving,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp),
+                        shape = RoundedCornerShape(18.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Color(0xFFF7FBFE),
+                            contentColor = Color(0xFF116DAE),
+                        ),
+                    ) {
+                        Text(
+                            text = "${drinkTypeDisplayLabel(option.drinkType)}\n${option.amountMl}ml",
+                            maxLines = 2,
+                            overflow = TextOverflow.Clip,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+
+            when (status) {
+                is HomeQuickRecordStatus.Success -> {
+                    Text(
+                        text = "${drinkTypeDisplayLabel(status.drinkType)} ${status.amountMl}mlを記録しました",
+                        color = Color(0xFF168344),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+
+                HomeQuickRecordStatus.Error -> {
+                    Text(
+                        text = "記録できませんでした。もう一度お試しください",
+                        color = Color(0xFFB3261E),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+
+                null -> Unit
+            }
         }
     }
 }
@@ -1602,8 +1768,8 @@ private fun SummaryCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
                 text = "Today's intake",
@@ -1613,9 +1779,9 @@ private fun SummaryCard(
             Text(
                 text = "$todayTotalMl ml",
                 color = Color(0xFF0F2F47),
-                fontSize = 48.sp,
+                fontSize = 40.sp,
                 fontWeight = FontWeight.Bold,
-                lineHeight = 52.sp,
+                lineHeight = 44.sp,
             )
             if (isGoalAchieved) {
                 AchievementBadge()
@@ -2660,7 +2826,7 @@ private fun MizunomiAppPreview() {
         dailyGoalMl = DefaultDailyGoalMl,
         wakeTimeMinutes = DefaultWakeTimeMinutes,
         bedTimeMinutes = DefaultBedTimeMinutes,
-        onAddRecord = { _, amountMl, _, _, onSaved -> onSaved(400 + amountMl) },
+        onAddRecord = { _, amountMl, _, _, onSaved, _ -> onSaved(400 + amountMl) },
         onUpdateRecord = { _, _, _ -> },
         onDeleteRecord = {},
         onReminderEnabledChange = {},
