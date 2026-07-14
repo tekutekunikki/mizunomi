@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -48,6 +49,10 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -61,9 +66,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -87,6 +95,7 @@ import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -114,6 +123,13 @@ private sealed interface HomeQuickRecordStatus {
     data class Success(val drinkType: String, val amountMl: Int) : HomeQuickRecordStatus
     data object Error : HomeQuickRecordStatus
 }
+
+private data class RecordSnackbarFeedback(
+    val recordId: Long,
+    val drinkType: String,
+    val amountMl: Int,
+    val dayTotalMl: Int,
+)
 
 private sealed interface CsvExportStatus {
     data object InProgress : CsvExportStatus
@@ -277,12 +293,12 @@ fun MizunomiApp(
         onAddRecord = { drinkType, amountMl, timestamp, recordDate, onSaved, onError ->
             scope.launch {
                 try {
-                    repository.addRecord(
+                    val recordId = repository.addRecord(
                         drinkType = drinkType,
                         amountMl = amountMl,
                         timestamp = timestamp,
                     )
-                    onSaved(repository.getTotalAmountForDay(recordDate))
+                    onSaved(recordId, repository.getTotalAmountForDay(recordDate))
                 } catch (exception: Exception) {
                     onError()
                 }
@@ -301,6 +317,17 @@ fun MizunomiApp(
         onDeleteRecord = { record ->
             scope.launch {
                 repository.deleteRecord(record)
+            }
+        },
+        onDeleteRecordById = { recordId, onSuccess, onError ->
+            scope.launch {
+                runCatching {
+                    repository.deleteRecordById(recordId)
+                }.onSuccess {
+                    onSuccess()
+                }.onFailure {
+                    onError()
+                }
             }
         },
         onReminderEnabledChange = { enabled ->
@@ -358,11 +385,12 @@ fun MizunomiAppContent(
         amountMl: Int,
         timestamp: Long,
         recordDate: LocalDate,
-        onSaved: (dayTotalMl: Int) -> Unit,
+        onSaved: (recordId: Long, dayTotalMl: Int) -> Unit,
         onError: () -> Unit,
     ) -> Unit,
     onUpdateRecord: (record: IntakeRecord, drinkType: String, amountMl: Int) -> Unit,
     onDeleteRecord: (record: IntakeRecord) -> Unit,
+    onDeleteRecordById: (recordId: Long, onSuccess: () -> Unit, onError: () -> Unit) -> Unit,
     onReminderEnabledChange: (Boolean) -> Unit,
     onDailyGoalChange: (Int) -> Unit,
     onWakeTimeChange: (Int) -> Unit,
@@ -390,6 +418,44 @@ fun MizunomiAppContent(
     var selectedTab by remember { mutableStateOf(AppTab.Home) }
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val dismissSnackbar: () -> Unit = {
+        snackbarHostState.currentSnackbarData?.dismiss()
+    }
+    val showRecordSnackbar = { feedback: RecordSnackbarFeedback ->
+        dismissSnackbar()
+        uiScope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = buildRecordSnackbarMessage(feedback, dailyGoalMl),
+                actionLabel = "\u5143\u306B\u623B\u3059",
+                withDismissAction = true,
+                duration = SnackbarDuration.Short,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                onDeleteRecordById(
+                    feedback.recordId,
+                    {
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        uiScope.launch {
+                            snackbarHostState.showSnackbar(
+                                message = "\u76F4\u524D\u306E\u8A18\u9332\u3092\u5143\u306B\u623B\u3057\u307E\u3057\u305F",
+                                duration = SnackbarDuration.Short,
+                            )
+                        }
+                    },
+                    {
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        uiScope.launch {
+                            snackbarHostState.showSnackbar(
+                                message = "\u5143\u306B\u623B\u305B\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044",
+                                duration = SnackbarDuration.Short,
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
     LaunchedEffect(selectedTab, currentDate) {
         if (selectedTab == AppTab.Home) {
             onRefreshCurrentDate()
@@ -441,12 +507,20 @@ fun MizunomiAppContent(
                 amountMl,
                 recordDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                 recordDateTime.toLocalDate(),
-                { updatedDayTotalMl ->
+                { recordId, updatedDayTotalMl ->
                     recordFeedback = RecordFeedback(
                         drinkType = drinkType,
                         amountMl = amountMl,
                         recordedAt = recordDateTime,
                         dayTotalMl = updatedDayTotalMl,
+                    )
+                    showRecordSnackbar(
+                        RecordSnackbarFeedback(
+                            recordId = recordId,
+                            drinkType = drinkType,
+                            amountMl = amountMl,
+                            dayTotalMl = updatedDayTotalMl,
+                        ),
                     )
                 },
                 {
@@ -466,11 +540,19 @@ fun MizunomiAppContent(
                 option.amountMl,
                 recordDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                 recordDateTime.toLocalDate(),
-                {
+                { recordId, updatedDayTotalMl ->
                     isHomeQuickRecordSaving = false
                     homeQuickRecordStatus = HomeQuickRecordStatus.Success(
                         drinkType = option.drinkType,
                         amountMl = option.amountMl,
+                    )
+                    showRecordSnackbar(
+                        RecordSnackbarFeedback(
+                            recordId = recordId,
+                            drinkType = option.drinkType,
+                            amountMl = option.amountMl,
+                            dayTotalMl = updatedDayTotalMl,
+                        ),
                     )
                 },
                 {
@@ -560,112 +642,127 @@ fun MizunomiAppContent(
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Color(0xFFF4F8FB),
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             bottomBar = {
                 MizunomiBottomBar(
                     selectedTab = selectedTab,
                     onTabSelected = { tab ->
+                        dismissSnackbar()
                         onRefreshCurrentDate()
                         selectedTab = tab
                     },
                 )
             },
         ) { innerPadding ->
-            when (selectedTab) {
-                AppTab.Home -> HomeTabContent(
-                    contentPadding = innerPadding,
-                    todayTotalMl = todayTotalMl,
-                    remainingMl = remainingMl,
-                    progress = progress,
-                    progressPercent = progressPercent,
-                    isGoalAchieved = isGoalAchieved,
-                    dailyGoalMl = dailyGoalMl,
-                    paceStatus = paceStatus,
-                    drinkNotices = drinkNotices,
-                    quickRecordOptions = HomeQuickRecordOptions,
-                    quickRecordStatus = homeQuickRecordStatus,
-                    isQuickRecordSaving = isHomeQuickRecordSaving,
-                    onQuickRecord = addHomeQuickRecord,
-                    onGoToRecordTab = { selectedTab = AppTab.Record },
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .dismissSnackbarOnPointerDown(snackbarHostState),
+            ) {
+                when (selectedTab) {
+                    AppTab.Home -> HomeTabContent(
+                        contentPadding = innerPadding,
+                        todayTotalMl = todayTotalMl,
+                        remainingMl = remainingMl,
+                        progress = progress,
+                        progressPercent = progressPercent,
+                        isGoalAchieved = isGoalAchieved,
+                        dailyGoalMl = dailyGoalMl,
+                        paceStatus = paceStatus,
+                        drinkNotices = drinkNotices,
+                        quickRecordOptions = HomeQuickRecordOptions,
+                        quickRecordStatus = homeQuickRecordStatus,
+                        isQuickRecordSaving = isHomeQuickRecordSaving,
+                        onQuickRecord = addHomeQuickRecord,
+                        onGoToRecordTab = {
+                            dismissSnackbar()
+                            selectedTab = AppTab.Record
+                        },
+                        onScrollStarted = dismissSnackbar,
+                    )
 
-                AppTab.Record -> RecordTabContent(
-                    contentPadding = innerPadding,
-                    drinkTypes = drinkTypes,
-                    amounts = amounts,
-                    selectedDrinkType = selectedDrinkType,
-                    onDrinkTypeSelected = { selectedDrinkType = it },
-                    feedback = recordFeedback,
-                    dailyGoalMl = dailyGoalMl,
-                    selectedRecordDate = selectedRecordDate,
-                    selectedRecordTime = selectedRecordTime,
-                    recordDateTimeError = recordDateTimeError,
-                    onRecordDateSelected = { date ->
-                        selectedRecordDate = date
-                        recordDateTimeError = null
-                    },
-                    onUseCurrentTime = {
-                        selectedRecordTime = null
-                        recordDateTimeError = null
-                    },
-                    onRecordTimeSelected = { time ->
-                        selectedRecordTime = time
-                        recordDateTimeError = null
-                    },
-                    onQuickAdd = { amountMl ->
-                        addRecordWithFeedback(selectedDrinkType, amountMl)
-                    },
-                    onVoiceInput = {
-                        try {
-                            voiceInputLauncher.launch(buildVoiceRecognitionIntent())
-                        } catch (exception: ActivityNotFoundException) {
-                            voiceInputState = VoiceInputState(
-                                rawText = null,
-                                candidate = null,
-                                errorMessage = "\u7AEF\u672B\u306E\u97F3\u58F0\u5165\u529B\u3092\u8D77\u52D5\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
-                            )
-                        }
-                    },
-                )
-
-                AppTab.History -> HistoryTabContent(
-                    contentPadding = innerPadding,
-                    weeklyTrend = weeklyTrend,
-                    displayedWeekStart = displayedWeekStart,
-                    currentWeekStart = currentWeekStart,
-                    dailyGoalMl = dailyGoalMl,
-                    drinkSummaries = drinkSummaries,
-                    recentRecords = recentRecords.sortedByDescending { it.timestamp },
-                    onEdit = { editingRecord = it },
-                    onDelete = { deletingRecord = it },
-                    onDisplayedWeekStartChange = onDisplayedWeekStartChange,
-                )
-
-                AppTab.Settings -> SettingsTabContent(
-                    contentPadding = innerPadding,
-                    reminderEnabled = reminderEnabled,
-                    dailyGoalMl = dailyGoalMl,
-                    wakeTimeMinutes = wakeTimeMinutes,
-                    bedTimeMinutes = bedTimeMinutes,
-                    onReminderEnabledChange = onReminderEnabledChange,
-                    onDailyGoalChange = onDailyGoalChange,
-                    onWakeTimeChange = onWakeTimeChange,
-                    onBedTimeChange = onBedTimeChange,
-                    csvExportStatus = csvExportStatus,
-                    onExportCsv = {
-                        csvExportStatus = CsvExportStatus.InProgress
-                        onPrepareCsvExport(
-                            { csvContent ->
-                                pendingCsvContent = csvContent
-                                createCsvDocumentLauncher.launch(
-                                    "mizunomi-records-${LocalDate.now()}.csv",
+                    AppTab.Record -> RecordTabContent(
+                        contentPadding = innerPadding,
+                        drinkTypes = drinkTypes,
+                        amounts = amounts,
+                        selectedDrinkType = selectedDrinkType,
+                        onDrinkTypeSelected = { selectedDrinkType = it },
+                        feedback = recordFeedback,
+                        dailyGoalMl = dailyGoalMl,
+                        selectedRecordDate = selectedRecordDate,
+                        selectedRecordTime = selectedRecordTime,
+                        recordDateTimeError = recordDateTimeError,
+                        onRecordDateSelected = { date ->
+                            selectedRecordDate = date
+                            recordDateTimeError = null
+                        },
+                        onUseCurrentTime = {
+                            selectedRecordTime = null
+                            recordDateTimeError = null
+                        },
+                        onRecordTimeSelected = { time ->
+                            selectedRecordTime = time
+                            recordDateTimeError = null
+                        },
+                        onQuickAdd = { amountMl ->
+                            addRecordWithFeedback(selectedDrinkType, amountMl)
+                        },
+                        onVoiceInput = {
+                            try {
+                                voiceInputLauncher.launch(buildVoiceRecognitionIntent())
+                            } catch (exception: ActivityNotFoundException) {
+                                voiceInputState = VoiceInputState(
+                                    rawText = null,
+                                    candidate = null,
+                                    errorMessage = "\u7AEF\u672B\u306E\u97F3\u58F0\u5165\u529B\u3092\u8D77\u52D5\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
                                 )
-                            },
-                            { message ->
-                                csvExportStatus = CsvExportStatus.Error(message)
-                            },
-                        )
-                    },
-                )
+                            }
+                        },
+                        onScrollStarted = dismissSnackbar,
+                    )
+
+                    AppTab.History -> HistoryTabContent(
+                        contentPadding = innerPadding,
+                        weeklyTrend = weeklyTrend,
+                        displayedWeekStart = displayedWeekStart,
+                        currentWeekStart = currentWeekStart,
+                        dailyGoalMl = dailyGoalMl,
+                        drinkSummaries = drinkSummaries,
+                        recentRecords = recentRecords.sortedByDescending { it.timestamp },
+                        onEdit = { editingRecord = it },
+                        onDelete = { deletingRecord = it },
+                        onDisplayedWeekStartChange = onDisplayedWeekStartChange,
+                        onScrollStarted = dismissSnackbar,
+                    )
+
+                    AppTab.Settings -> SettingsTabContent(
+                        contentPadding = innerPadding,
+                        reminderEnabled = reminderEnabled,
+                        dailyGoalMl = dailyGoalMl,
+                        wakeTimeMinutes = wakeTimeMinutes,
+                        bedTimeMinutes = bedTimeMinutes,
+                        onReminderEnabledChange = onReminderEnabledChange,
+                        onDailyGoalChange = onDailyGoalChange,
+                        onWakeTimeChange = onWakeTimeChange,
+                        onBedTimeChange = onBedTimeChange,
+                        csvExportStatus = csvExportStatus,
+                        onExportCsv = {
+                            csvExportStatus = CsvExportStatus.InProgress
+                            onPrepareCsvExport(
+                                { csvContent ->
+                                    pendingCsvContent = csvContent
+                                    createCsvDocumentLauncher.launch(
+                                        "mizunomi-records-${LocalDate.now()}.csv",
+                                    )
+                                },
+                                { message ->
+                                    csvExportStatus = CsvExportStatus.Error(message)
+                                },
+                            )
+                        },
+                        onScrollStarted = dismissSnackbar,
+                    )
+                }
             }
         }
     }
@@ -727,8 +824,9 @@ private fun HomeTabContent(
     isQuickRecordSaving: Boolean,
     onQuickRecord: (HomeQuickRecordOption) -> Unit,
     onGoToRecordTab: () -> Unit,
+    onScrollStarted: () -> Unit,
 ) {
-    MizunomiTabList(contentPadding = contentPadding) {
+    MizunomiTabList(contentPadding = contentPadding, onScrollStarted = onScrollStarted) {
         item { TabHeader(title = "mizunomi", subtitle = "今日の水分バランス") }
         item {
             SummaryCard(
@@ -869,8 +967,9 @@ private fun RecordTabContent(
     onRecordTimeSelected: (LocalTime) -> Unit,
     onQuickAdd: (Int) -> Unit,
     onVoiceInput: () -> Unit,
+    onScrollStarted: () -> Unit,
 ) {
-    MizunomiTabList(contentPadding = contentPadding) {
+    MizunomiTabList(contentPadding = contentPadding, onScrollStarted = onScrollStarted) {
         item { TabHeader(title = "記録", subtitle = "飲んだ分をすぐ追加") }
         item {
             AddIntakeCard(
@@ -977,8 +1076,9 @@ private fun HistoryTabContent(
     onEdit: (IntakeRecord) -> Unit,
     onDelete: (IntakeRecord) -> Unit,
     onDisplayedWeekStartChange: (LocalDate) -> Unit,
+    onScrollStarted: () -> Unit,
 ) {
-    MizunomiTabList(contentPadding = contentPadding) {
+    MizunomiTabList(contentPadding = contentPadding, onScrollStarted = onScrollStarted) {
         item { TabHeader(title = "履歴", subtitle = "最近の記録と7日間の変化") }
         item {
             WeeklyTrendCard(
@@ -1029,6 +1129,7 @@ private fun SettingsTabContent(
     onBedTimeChange: (Int) -> Unit,
     csvExportStatus: CsvExportStatus?,
     onExportCsv: () -> Unit,
+    onScrollStarted: () -> Unit,
 ) {
     var showDailyGoalDialog by remember { mutableStateOf(false) }
     var lifestyleError by remember { mutableStateOf<String?>(null) }
@@ -1045,7 +1146,7 @@ private fun SettingsTabContent(
         )
     }
 
-    MizunomiTabList(contentPadding = contentPadding) {
+    MizunomiTabList(contentPadding = contentPadding, onScrollStarted = onScrollStarted) {
         item { TabHeader(title = "設定", subtitle = "自分に合う水分習慣へ") }
         item {
             SettingsFoundationCard(
@@ -1108,17 +1209,64 @@ private fun SettingsTabContent(
 @Composable
 private fun MizunomiTabList(
     contentPadding: PaddingValues,
+    onScrollStarted: () -> Unit,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { isScrollInProgress ->
+                if (isScrollInProgress) {
+                    onScrollStarted()
+                }
+            }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFF4F8FB))
             .padding(contentPadding),
+        state = listState,
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         content = content,
     )
+}
+
+private fun Modifier.dismissSnackbarOnPointerDown(
+    snackbarHostState: SnackbarHostState,
+): Modifier = pointerInput(snackbarHostState) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            if (
+                snackbarHostState.currentSnackbarData != null &&
+                event.changes.any { it.changedToDownIgnoreConsumed() }
+            ) {
+                snackbarHostState.currentSnackbarData?.dismiss()
+            }
+        }
+    }
+}
+
+private fun buildRecordSnackbarMessage(
+    feedback: RecordSnackbarFeedback,
+    dailyGoalMl: Int,
+): String {
+    val numberFormat = NumberFormat.getNumberInstance(Locale.JAPAN)
+    val totalText = numberFormat.format(feedback.dayTotalMl)
+    val goalText = numberFormat.format(dailyGoalMl)
+    val remainingMl = (dailyGoalMl - feedback.dayTotalMl).coerceAtLeast(0)
+    val drinkLabel = drinkTypeDisplayLabel(feedback.drinkType)
+
+    return if (feedback.dayTotalMl >= dailyGoalMl) {
+        "\u4ECA\u65E5\u306E\u76EE\u6A19\u3092\u9054\u6210\u3057\u307E\u3057\u305F\n" +
+            "$drinkLabel ${numberFormat.format(feedback.amountMl)}ml\u3092\u8A18\u9332\u30FB${totalText}ml\u9054\u6210"
+    } else {
+        "$drinkLabel ${numberFormat.format(feedback.amountMl)}ml\u3092\u8A18\u9332\u3057\u307E\u3057\u305F\n" +
+            "\u4ECA\u65E5\u306E\u5408\u8A08 ${totalText}ml / ${goalText}ml\u30FB\u3042\u3068${numberFormat.format(remainingMl)}ml"
+    }
 }
 
 @Composable
@@ -2872,9 +3020,10 @@ private fun MizunomiAppPreview() {
         bedTimeMinutes = DefaultBedTimeMinutes,
         currentDate = LocalDate.now(),
         onRefreshCurrentDate = {},
-        onAddRecord = { _, amountMl, _, _, onSaved, _ -> onSaved(400 + amountMl) },
+        onAddRecord = { _, amountMl, _, _, onSaved, _ -> onSaved(99, 400 + amountMl) },
         onUpdateRecord = { _, _, _ -> },
         onDeleteRecord = {},
+        onDeleteRecordById = { _, onSuccess, _ -> onSuccess() },
         onReminderEnabledChange = {},
         onDailyGoalChange = {},
         onWakeTimeChange = {},
