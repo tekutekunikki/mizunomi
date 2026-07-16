@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,6 +33,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -69,11 +72,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -117,6 +123,13 @@ private data class RecordFeedback(
 private data class HomeQuickRecordOption(
     val drinkType: String,
     val amountMl: Int,
+)
+
+private data class HydrationGuideTopic(
+    val title: String,
+    val description: String,
+    val imageResId: Int,
+    val contentDescription: String,
 )
 
 private sealed interface HomeQuickRecordStatus {
@@ -182,6 +195,39 @@ private val HomeQuickRecordOptions = listOf(
     HomeQuickRecordOption(drinkType = "\u6C34", amountMl = 100),
     HomeQuickRecordOption(drinkType = "\u304A\u8336", amountMl = 100),
     HomeQuickRecordOption(drinkType = "\u30B3\u30FC\u30D2\u30FC", amountMl = 200),
+)
+
+private val HydrationGuideTopics = listOf(
+    HydrationGuideTopic(
+        title = "\u3053\u307E\u3081\u306B\u98F2\u3080",
+        description = "\u4E00\u5EA6\u306B\u305F\u304F\u3055\u3093\u3067\u306F\u306A\u304F\u3001\u5C11\u3057\u305A\u3064\u6C34\u5206\u3092\u3068\u308B\u3068\u7D9A\u3051\u3084\u3059\u304F\u306A\u308A\u307E\u3059\u3002",
+        imageResId = R.drawable.hydrate_often,
+        contentDescription = "\u3053\u307E\u3081\u306A\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+    ),
+    HydrationGuideTopic(
+        title = "\u8D77\u5E8A\u5F8C\u306B1\u676F",
+        description = "\u671D\u306E\u751F\u6D3B\u30EA\u30BA\u30E0\u306B\u5408\u308F\u305B\u3066\u3001\u307E\u305A\u306F1\u676F\u304B\u3089\u59CB\u3081\u307E\u3057\u3087\u3046\u3002",
+        imageResId = R.drawable.morning_water,
+        contentDescription = "\u8D77\u5E8A\u5F8C\u306E\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+    ),
+    HydrationGuideTopic(
+        title = "\u904B\u52D5\u524D\u5F8C\u306B\u88DC\u7D66",
+        description = "\u4F53\u3092\u52D5\u304B\u3059\u524D\u5F8C\u306F\u3001\u6C34\u5206\u88DC\u7D66\u3092\u610F\u8B58\u3057\u3084\u3059\u3044\u30BF\u30A4\u30DF\u30F3\u30B0\u3067\u3059\u3002",
+        imageResId = R.drawable.exercise_hydration,
+        contentDescription = "\u904B\u52D5\u524D\u5F8C\u306E\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+    ),
+    HydrationGuideTopic(
+        title = "\u5165\u6D74\u524D\u5F8C\u3082\u610F\u8B58",
+        description = "\u5165\u6D74\u306E\u524D\u5F8C\u306F\u3001\u5FD8\u308C\u305A\u306B\u6C34\u5206\u3092\u3068\u308B\u304D\u3063\u304B\u3051\u306B\u3057\u307E\u3057\u3087\u3046\u3002",
+        imageResId = R.drawable.bath_hydration,
+        contentDescription = "\u5165\u6D74\u524D\u5F8C\u306E\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+    ),
+    HydrationGuideTopic(
+        title = "\u5C31\u5BDD\u524D\u306F\u63A7\u3048\u3081\u306B",
+        description = "\u5BDD\u308B\u524D\u306F\u7121\u7406\u306B\u591A\u304F\u98F2\u307E\u305A\u3001\u6C17\u306B\u306A\u308B\u5834\u5408\u306F\u63A7\u3048\u3081\u306B\u3057\u307E\u3057\u3087\u3046\u3002",
+        imageResId = R.drawable.before_sleep_water,
+        contentDescription = "\u5C31\u5BDD\u524D\u306E\u63A7\u3048\u3081\u306A\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+    ),
 )
 
 class MainActivity : ComponentActivity() {
@@ -850,6 +896,89 @@ private fun HomeTabContent(
         }
         if (drinkNotices.isNotEmpty()) {
             item { DrinkNoticeCard(notices = drinkNotices) }
+        }
+        item { HydrationGuideSection(topics = HydrationGuideTopics) }
+    }
+}
+
+@Composable
+private fun HydrationGuideSection(topics: List<HydrationGuideTopic>) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = "\u6C34\u5206\u88DC\u7D66\u30AC\u30A4\u30C9",
+                color = Color(0xFF25384A),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "\u6BCE\u65E5\u7D9A\u3051\u3084\u3059\u3044\u30BF\u30A4\u30DF\u30F3\u30B0\u3092\u3001\u30A4\u30E9\u30B9\u30C8\u3067\u78BA\u8A8D\u3067\u304D\u307E\u3059\u3002",
+                color = Color(0xFF6C7A86),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(end = 28.dp),
+        ) {
+            items(topics) { topic ->
+                HydrationGuideCard(topic = topic)
+            }
+        }
+
+        Text(
+            text = "\u5FC5\u8981\u306A\u6C34\u5206\u91CF\u306F\u3001\u4F53\u683C\u30FB\u6D3B\u52D5\u91CF\u30FB\u6C17\u6E29\u30FB\u98DF\u4E8B\u5185\u5BB9\u306B\u3088\u3063\u3066\u5909\u308F\u308A\u307E\u3059\u3002\n" +
+                "\u4F53\u8ABF\u306B\u4E0D\u5B89\u304C\u3042\u308B\u5834\u5408\u306F\u3001\u7121\u7406\u305B\u305A\u5C02\u9580\u5BB6\u306B\u76F8\u8AC7\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+            color = Color(0xFF6C7A86),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun HydrationGuideCard(topic: HydrationGuideTopic) {
+    Card(
+        modifier = Modifier.width(268.dp),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFFEAF5FC)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(id = topic.imageResId),
+                    contentDescription = topic.contentDescription,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(6.dp),
+                )
+            }
+            Text(
+                text = topic.title,
+                color = Color(0xFF25384A),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = topic.description,
+                color = Color(0xFF526777),
+                style = MaterialTheme.typography.bodySmall,
+                lineHeight = 18.sp,
+            )
         }
     }
 }
