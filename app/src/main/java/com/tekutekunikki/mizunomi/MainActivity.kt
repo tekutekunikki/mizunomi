@@ -544,6 +544,13 @@ fun MizunomiAppContent(
             }
         }
     }
+    val resetRecordDateTimeToNow = {
+        val resetNow = LocalDateTime.now().withSecond(0).withNano(0)
+        onRefreshCurrentDate()
+        selectedRecordDate = resetNow.toLocalDate()
+        selectedRecordTime = null
+        recordDateTimeError = null
+    }
     val addRecordWithFeedback = { drinkType: String, amountMl: Int ->
         onRefreshCurrentDate()
         val now = LocalDateTime.now()
@@ -551,6 +558,8 @@ fun MizunomiAppContent(
             selectedRecordDate,
             selectedRecordTime ?: now.toLocalTime(),
         ).withSecond(0).withNano(0)
+        val shouldResetRecordDateTime =
+            selectedRecordDate != now.toLocalDate() || selectedRecordTime != null
         val validationError = validateRecordDateTime(recordDateTime, now)
         recordDateTimeError = validationError
         if (validationError == null) {
@@ -566,6 +575,9 @@ fun MizunomiAppContent(
                         recordedAt = recordDateTime,
                         dayTotalMl = updatedDayTotalMl,
                     )
+                    if (shouldResetRecordDateTime) {
+                        resetRecordDateTimeToNow()
+                    }
                     showRecordSnackbar(
                         RecordSnackbarFeedback(
                             recordId = recordId,
