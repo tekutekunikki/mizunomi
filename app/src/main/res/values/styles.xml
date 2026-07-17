@@ -1,3 +1,9 @@
 <resources>
     <style name="Theme.Mizunomi" parent="android:style/Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.Mizunomi.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#F4F8FB</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/mizunomi_splash02</item>
+        <item name="postSplashScreenTheme">@style/Theme.Mizunomi</item>
+    </style>
 </resources>
