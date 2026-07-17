@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -101,6 +104,7 @@ import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -462,6 +466,8 @@ fun MizunomiAppContent(
     var csvExportStatus by remember { mutableStateOf<CsvExportStatus?>(null) }
     var pendingCsvContent by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableStateOf(AppTab.Home) }
+    var autoScrollToAmountRequest by remember { mutableStateOf(0) }
+    var isRecordScrollInProgress by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val uiScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -732,12 +738,21 @@ fun MizunomiAppContent(
                         drinkTypes = drinkTypes,
                         amounts = amounts,
                         selectedDrinkType = selectedDrinkType,
-                        onDrinkTypeSelected = { selectedDrinkType = it },
+                        onDrinkTypeSelected = { drinkType ->
+                            if (drinkType != selectedDrinkType) {
+                                selectedDrinkType = drinkType
+                                if (!isRecordScrollInProgress) {
+                                    autoScrollToAmountRequest += 1
+                                }
+                            }
+                        },
                         feedback = recordFeedback,
                         dailyGoalMl = dailyGoalMl,
                         selectedRecordDate = selectedRecordDate,
                         selectedRecordTime = selectedRecordTime,
                         recordDateTimeError = recordDateTimeError,
+                        autoScrollToAmountRequest = autoScrollToAmountRequest,
+                        autoScrollToAmountEnabled = !isRecordScrollInProgress,
                         onRecordDateSelected = { date ->
                             selectedRecordDate = date
                             recordDateTimeError = null
@@ -765,6 +780,9 @@ fun MizunomiAppContent(
                             }
                         },
                         onScrollStarted = dismissSnackbar,
+                        onScrollInProgressChanged = { isScrollInProgress ->
+                            isRecordScrollInProgress = isScrollInProgress
+                        },
                     )
 
                     AppTab.History -> HistoryTabContent(
@@ -1091,14 +1109,21 @@ private fun RecordTabContent(
     selectedRecordDate: LocalDate,
     selectedRecordTime: LocalTime?,
     recordDateTimeError: String?,
+    autoScrollToAmountRequest: Int,
+    autoScrollToAmountEnabled: Boolean,
     onRecordDateSelected: (LocalDate) -> Unit,
     onUseCurrentTime: () -> Unit,
     onRecordTimeSelected: (LocalTime) -> Unit,
     onQuickAdd: (Int) -> Unit,
     onVoiceInput: () -> Unit,
     onScrollStarted: () -> Unit,
+    onScrollInProgressChanged: (Boolean) -> Unit,
 ) {
-    MizunomiTabList(contentPadding = contentPadding, onScrollStarted = onScrollStarted) {
+    MizunomiTabList(
+        contentPadding = contentPadding,
+        onScrollStarted = onScrollStarted,
+        onScrollInProgressChanged = onScrollInProgressChanged,
+    ) {
         item { TabHeader(title = "記録", subtitle = "飲んだ分をすぐ追加") }
         item {
             AddIntakeCard(
@@ -1109,6 +1134,8 @@ private fun RecordTabContent(
                 selectedRecordDate = selectedRecordDate,
                 selectedRecordTime = selectedRecordTime,
                 recordDateTimeError = recordDateTimeError,
+                autoScrollToAmountRequest = autoScrollToAmountRequest,
+                autoScrollToAmountEnabled = autoScrollToAmountEnabled,
                 onRecordDateSelected = onRecordDateSelected,
                 onUseCurrentTime = onUseCurrentTime,
                 onRecordTimeSelected = onRecordTimeSelected,
@@ -1339,6 +1366,7 @@ private fun SettingsTabContent(
 private fun MizunomiTabList(
     contentPadding: PaddingValues,
     onScrollStarted: () -> Unit,
+    onScrollInProgressChanged: (Boolean) -> Unit = {},
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -1348,6 +1376,7 @@ private fun MizunomiTabList(
                 if (isScrollInProgress) {
                     onScrollStarted()
                 }
+                onScrollInProgressChanged(isScrollInProgress)
             }
     }
 
@@ -2452,6 +2481,7 @@ private fun TypeSummaryCard(summaries: List<DrinkSummary>) {
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun AddIntakeCard(
     drinkTypes: List<String>,
     amounts: List<Int>,
@@ -2460,12 +2490,23 @@ private fun AddIntakeCard(
     selectedRecordDate: LocalDate,
     selectedRecordTime: LocalTime?,
     recordDateTimeError: String?,
+    autoScrollToAmountRequest: Int,
+    autoScrollToAmountEnabled: Boolean,
     onRecordDateSelected: (LocalDate) -> Unit,
     onUseCurrentTime: () -> Unit,
     onRecordTimeSelected: (LocalTime) -> Unit,
     onQuickAdd: (Int) -> Unit,
     onVoiceInput: () -> Unit,
 ) {
+    val amountAreaRequester = remember { BringIntoViewRequester() }
+
+    LaunchedEffect(autoScrollToAmountRequest, autoScrollToAmountEnabled) {
+        if (autoScrollToAmountRequest > 0 && autoScrollToAmountEnabled) {
+            delay(80)
+            amountAreaRequester.bringIntoView()
+        }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
@@ -2507,11 +2548,55 @@ private fun AddIntakeCard(
                 onSelected = onDrinkTypeSelected,
                 labelForValue = ::drinkTypeDisplayLabel,
             )
-            QuickAmountGrid(
+            AmountSelectionPrompt(
+                selectedDrinkType = selectedDrinkType,
                 amounts = amounts,
                 onQuickAdd = onQuickAdd,
+                modifier = Modifier.bringIntoViewRequester(amountAreaRequester),
             )
         }
+    }
+}
+
+@Composable
+private fun AmountSelectionPrompt(
+    selectedDrinkType: String,
+    amounts: List<Int>,
+    onQuickAdd: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF5FC)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = "${drinkTypeDisplayLabel(selectedDrinkType)}\u3092\u9078\u629E\u4E2D",
+                    color = Color(0xFF0F5F94),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "\u91CF\u3092\u9078\u3093\u3067\u8A18\u9332\u3057\u3066\u304F\u3060\u3055\u3044",
+                    color = Color(0xFF527189),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+        QuickAmountGrid(
+            amounts = amounts,
+            onQuickAdd = onQuickAdd,
+        )
     }
 }
 
