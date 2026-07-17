@@ -5,7 +5,7 @@
         android:allowBackup="true"
         android:label="mizunomi"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Mizunomi">
+        android:theme="@style/Theme.Mizunomi.Splash">
         <activity
             android:name=".MainActivity"
             android:exported="true">

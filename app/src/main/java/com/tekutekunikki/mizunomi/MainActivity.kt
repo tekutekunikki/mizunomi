@@ -14,6 +14,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -253,12 +254,13 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         HydrationReminderNotifications.createChannel(this)
         HydrationReminderScheduler.scheduleDailyChecks(this)
         requestNotificationPermissionIfNeeded()
         setContent {
-            MizunomiApp(
+            MizunomiRootApp(
                 repository = repository,
                 reminderSettingsRepository = reminderSettingsRepository,
                 currentDate = currentDateState.value,
@@ -284,6 +286,50 @@ class MainActivity : ComponentActivity() {
             return
         }
         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+}
+
+@Composable
+private fun MizunomiRootApp(
+    repository: IntakeRecordRepository,
+    reminderSettingsRepository: ReminderSettingsRepository,
+    currentDate: LocalDate,
+    onRefreshCurrentDate: () -> Unit,
+) {
+    var showSplash by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        delay(1_000)
+        showSplash = false
+    }
+
+    if (showSplash) {
+        MizunomiSplashScreen()
+    } else {
+        MizunomiApp(
+            repository = repository,
+            reminderSettingsRepository = reminderSettingsRepository,
+            currentDate = currentDate,
+            onRefreshCurrentDate = onRefreshCurrentDate,
+        )
+    }
+}
+
+@Composable
+private fun MizunomiSplashScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF4F8FB))
+            .padding(28.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.mizunomi_splash02),
+            contentDescription = "\u6C34\u5206\u88DC\u7D66\u3092\u4F1D\u3048\u308Bmizunomi\u306E\u30B9\u30D7\u30E9\u30C3\u30B7\u30E5\u753B\u50CF",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
