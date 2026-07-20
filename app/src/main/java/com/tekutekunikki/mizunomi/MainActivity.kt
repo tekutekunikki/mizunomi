@@ -68,10 +68,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -359,29 +359,27 @@ fun MizunomiApp(
     currentDate: LocalDate,
     onRefreshCurrentDate: () -> Unit,
 ) {
-    val todayTotalMl by key(currentDate) {
+    val todayTotalFlow = remember(repository, currentDate) {
         repository.observeTotalAmountForDay(currentDate)
     }
-        .collectAsState(initial = 0)
-    val todayRecords by key(currentDate) {
+    val todayTotalMl by todayTotalFlow.collectAsState(initial = 0)
+    val todayRecordsFlow = remember(repository, currentDate) {
         repository.observeRecordsForDay(currentDate)
     }
-        .collectAsState(initial = emptyList())
-    val recentRecords by key(currentDate) {
+    val todayRecords by todayRecordsFlow.collectAsState(initial = emptyList())
+    val recentRecordsFlow = remember(repository, currentDate) {
         repository.observeRecentRecords(PastRecordLimitDays + 1)
     }
-        .collectAsState(initial = emptyList())
+    val recentRecords by recentRecordsFlow.collectAsState(initial = emptyList())
     val currentWeekStart = remember(currentDate) { currentDate.startOfWeek() }
     var displayedWeekStart by remember { mutableStateOf(currentWeekStart) }
     LaunchedEffect(currentWeekStart) {
-        if (displayedWeekStart.isAfter(currentWeekStart)) {
-            displayedWeekStart = currentWeekStart
-        }
+        displayedWeekStart = currentWeekStart
     }
-    val weeklyRecords by key(displayedWeekStart) {
+    val weeklyRecordsFlow = remember(repository, displayedWeekStart) {
         repository.observeRecordsForWeekContaining(displayedWeekStart)
-            .collectAsState(initial = emptyList())
     }
+    val weeklyRecords by weeklyRecordsFlow.collectAsState(initial = emptyList())
     val reminderEnabled by reminderSettingsRepository.reminderEnabled
         .collectAsState(initial = true)
     val dailyGoalMl by reminderSettingsRepository.dailyGoalMl
@@ -548,7 +546,7 @@ fun MizunomiAppContent(
 ) {
     val drinkTypes = DrinkTypes
     val amounts = listOf(100, 200, 300, 500)
-    var selectedDrinkType by remember { mutableStateOf(drinkTypes.first()) }
+    var selectedDrinkType by rememberSaveable { mutableStateOf(drinkTypes.first()) }
     var editingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     var deletingRecord by remember { mutableStateOf<IntakeRecord?>(null) }
     var voiceInputState by remember { mutableStateOf<VoiceInputState?>(null) }
@@ -562,7 +560,7 @@ fun MizunomiAppContent(
     var csvImportStatus by remember { mutableStateOf<CsvImportStatus?>(null) }
     var pendingCsvImport by remember { mutableStateOf<CsvImportPreview?>(null) }
     var pendingCsvContent by remember { mutableStateOf<String?>(null) }
-    var selectedTab by remember { mutableStateOf(AppTab.Home) }
+    var selectedTab by rememberSaveable { mutableStateOf(AppTab.Home) }
     var autoScrollToAmountRequest by remember { mutableStateOf(0) }
     var isRecordScrollInProgress by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -608,6 +606,13 @@ fun MizunomiAppContent(
     LaunchedEffect(selectedTab, currentDate) {
         if (selectedTab == AppTab.Home) {
             onRefreshCurrentDate()
+        }
+    }
+    var currentTime by remember { mutableStateOf(LocalTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTime = LocalTime.now()
+            delay(60_000)
         }
     }
     val createCsvDocumentLauncher = rememberLauncherForActivityResult(
@@ -769,7 +774,7 @@ fun MizunomiAppContent(
     val isGoalAchieved = todayTotalMl >= dailyGoalMl
     val paceStatus = buildPaceStatus(
         actualMl = todayTotalMl,
-        now = LocalTime.now(),
+        now = currentTime,
         dailyGoalMl = dailyGoalMl,
         wakeTimeMinutes = wakeTimeMinutes,
         bedTimeMinutes = bedTimeMinutes,
@@ -1431,7 +1436,7 @@ private fun HistoryTabContent(
                 EmptyHistoryCard()
             }
         } else {
-            items(recentRecords.take(10), key = { it.id }) { record ->
+            items(recentRecords, key = { it.id }) { record ->
                 IntakeRecordRow(
                     record = record,
                     onEdit = onEdit,
