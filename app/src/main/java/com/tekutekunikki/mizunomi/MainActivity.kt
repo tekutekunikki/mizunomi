@@ -122,6 +122,8 @@ private const val PastRecordLimitDays = 30L
 private const val SweetDrinkWarningThresholdMl = 500
 private const val BalancedDrinkTotalThresholdMl = 1000
 private const val WaterTeaMinimumThresholdMl = 500
+internal const val VoiceAmountMinMl = 50
+internal const val VoiceAmountMaxMl = 2_000
 private val MonthDayFormatter = DateTimeFormatter.ofPattern("M/d", Locale.JAPAN)
 private val WeekRangeFormatter = DateTimeFormatter.ofPattern("M/d(E)", Locale.JAPAN)
 
@@ -3359,12 +3361,12 @@ private fun buildVoiceInputState(text: String?): VoiceInputState =
         )
     }
 
-private fun parseVoiceIntake(text: String): VoiceIntakeCandidate? {
+internal fun parseVoiceIntake(text: String): VoiceIntakeCandidate? {
     val normalizedText = text.normalizeDigits()
     val amountMl = Regex("\\d+")
-        .find(normalizedText)
-        ?.value
-        ?.toIntOrNull()
+        .findAll(normalizedText)
+        .mapNotNull { match -> match.value.toIntOrNull() }
+        .firstOrNull { amount -> amount in VoiceAmountMinMl..VoiceAmountMaxMl }
         ?: return null
     val drinkType = classifyVoiceDrinkType(normalizedText)
 
@@ -3459,7 +3461,7 @@ private data class VoiceInputState(
     val errorMessage: String?,
 )
 
-private data class VoiceIntakeCandidate(
+internal data class VoiceIntakeCandidate(
     val drinkType: String,
     val amountMl: Int,
     val rawText: String,
