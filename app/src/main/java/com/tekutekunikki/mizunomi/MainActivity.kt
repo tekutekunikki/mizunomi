@@ -89,15 +89,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModelProvider
 import com.tekutekunikki.mizunomi.data.CsvImportException
 import com.tekutekunikki.mizunomi.data.CsvImportPreview
 import com.tekutekunikki.mizunomi.data.IntakeRecord
 import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
 import com.tekutekunikki.mizunomi.data.MaxCsvImportBytes
 import com.tekutekunikki.mizunomi.data.MizunomiDatabase
-import com.tekutekunikki.mizunomi.data.buildIntakeRecordsCsv
 import com.tekutekunikki.mizunomi.data.decodeUtf8Csv
-import com.tekutekunikki.mizunomi.data.parseIntakeRecordsCsv
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.text.NumberFormat
@@ -273,6 +272,15 @@ class MainActivity : ComponentActivity() {
     private val reminderSettingsRepository by lazy {
         ReminderSettingsRepository(this)
     }
+    private val mainViewModel by lazy {
+        ViewModelProvider(
+            this,
+            MainViewModel.Factory(
+                repository = repository,
+                reminderSettingsRepository = reminderSettingsRepository,
+            ),
+        )[MainViewModel::class.java]
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -282,8 +290,7 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
         setContent {
             MizunomiRootApp(
-                repository = repository,
-                reminderSettingsRepository = reminderSettingsRepository,
+                viewModel = mainViewModel,
                 currentDate = currentDateState.value,
                 onRefreshCurrentDate = ::refreshCurrentDate,
             )
@@ -312,8 +319,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun MizunomiRootApp(
-    repository: IntakeRecordRepository,
-    reminderSettingsRepository: ReminderSettingsRepository,
+    viewModel: MainViewModel,
     currentDate: LocalDate,
     onRefreshCurrentDate: () -> Unit,
 ) {
@@ -328,8 +334,7 @@ private fun MizunomiRootApp(
         MizunomiSplashScreen()
     } else {
         MizunomiApp(
-            repository = repository,
-            reminderSettingsRepository = reminderSettingsRepository,
+            viewModel = viewModel,
             currentDate = currentDate,
             onRefreshCurrentDate = onRefreshCurrentDate,
         )
@@ -356,21 +361,20 @@ private fun MizunomiSplashScreen() {
 
 @Composable
 fun MizunomiApp(
-    repository: IntakeRecordRepository,
-    reminderSettingsRepository: ReminderSettingsRepository,
+    viewModel: MainViewModel,
     currentDate: LocalDate,
     onRefreshCurrentDate: () -> Unit,
 ) {
-    val todayTotalFlow = remember(repository, currentDate) {
-        repository.observeTotalAmountForDay(currentDate)
+    val todayTotalFlow = remember(viewModel, currentDate) {
+        viewModel.observeTotalAmountForDay(currentDate)
     }
     val todayTotalMl by todayTotalFlow.collectAsState(initial = 0)
-    val todayRecordsFlow = remember(repository, currentDate) {
-        repository.observeRecordsForDay(currentDate)
+    val todayRecordsFlow = remember(viewModel, currentDate) {
+        viewModel.observeRecordsForDay(currentDate)
     }
     val todayRecords by todayRecordsFlow.collectAsState(initial = emptyList())
-    val recentRecordsFlow = remember(repository, currentDate) {
-        repository.observeRecentRecords(PastRecordLimitDays + 1)
+    val recentRecordsFlow = remember(viewModel, currentDate) {
+        viewModel.observeRecentRecords(PastRecordLimitDays + 1)
     }
     val recentRecords by recentRecordsFlow.collectAsState(initial = emptyList())
     val currentWeekStart = remember(currentDate) { currentDate.startOfWeek() }
@@ -378,19 +382,18 @@ fun MizunomiApp(
     LaunchedEffect(currentWeekStart) {
         displayedWeekStart = currentWeekStart
     }
-    val weeklyRecordsFlow = remember(repository, displayedWeekStart) {
-        repository.observeRecordsForWeekContaining(displayedWeekStart)
+    val weeklyRecordsFlow = remember(viewModel, displayedWeekStart) {
+        viewModel.observeRecordsForWeekContaining(displayedWeekStart)
     }
     val weeklyRecords by weeklyRecordsFlow.collectAsState(initial = emptyList())
-    val reminderEnabled by reminderSettingsRepository.reminderEnabled
+    val reminderEnabled by viewModel.reminderEnabled
         .collectAsState(initial = true)
-    val dailyGoalMl by reminderSettingsRepository.dailyGoalMl
+    val dailyGoalMl by viewModel.dailyGoalMl
         .collectAsState(initial = DefaultDailyGoalMl)
-    val wakeTimeMinutes by reminderSettingsRepository.wakeTimeMinutes
+    val wakeTimeMinutes by viewModel.wakeTimeMinutes
         .collectAsState(initial = DefaultWakeTimeMinutes)
-    val bedTimeMinutes by reminderSettingsRepository.bedTimeMinutes
+    val bedTimeMinutes by viewModel.bedTimeMinutes
         .collectAsState(initial = DefaultBedTimeMinutes)
-    val scope = rememberCoroutineScope()
 
     MizunomiAppContent(
         todayTotalMl = todayTotalMl,
@@ -406,60 +409,35 @@ fun MizunomiApp(
         currentDate = currentDate,
         onRefreshCurrentDate = onRefreshCurrentDate,
         onAddRecord = { drinkType, amountMl, timestamp, recordDate, onSaved, onError ->
-            scope.launch {
-                try {
-                    val recordId = repository.addRecord(
-                        drinkType = drinkType,
-                        amountMl = amountMl,
-                        timestamp = timestamp,
-                    )
-                    onSaved(recordId, repository.getTotalAmountForDay(recordDate))
-                } catch (exception: Exception) {
-                    onError()
-                }
-            }
+            viewModel.addRecord(
+                drinkType = drinkType,
+                amountMl = amountMl,
+                timestamp = timestamp,
+                recordDate = recordDate,
+                onSaved = onSaved,
+                onError = onError,
+            )
         },
         onUpdateRecord = { record, drinkType, amountMl ->
-            scope.launch {
-                repository.updateRecord(
-                    record.copy(
-                        drinkType = drinkType,
-                        amountMl = amountMl,
-                    ),
-                )
-            }
+            viewModel.updateRecord(record, drinkType, amountMl)
         },
         onDeleteRecord = { record ->
-            scope.launch {
-                repository.deleteRecord(record)
-            }
+            viewModel.deleteRecord(record)
         },
         onDeleteRecordById = { recordId, onSuccess, onError ->
-            scope.launch {
-                runCatching {
-                    repository.deleteRecordById(recordId)
-                }.onSuccess {
-                    onSuccess()
-                }.onFailure {
-                    onError()
-                }
-            }
+            viewModel.deleteRecordById(recordId, onSuccess, onError)
         },
         onReminderEnabledChange = { enabled ->
-            scope.launch {
-                reminderSettingsRepository.setReminderEnabled(enabled)
-            }
+            viewModel.setReminderEnabled(enabled)
         },
         onDailyGoalChange = { dailyGoalMl ->
-            scope.launch {
-                reminderSettingsRepository.setDailyGoalMl(dailyGoalMl)
-            }
+            viewModel.setDailyGoalMl(dailyGoalMl)
         },
         onWakeTimeChange = { minutes ->
-            scope.launch { reminderSettingsRepository.setWakeTimeMinutes(minutes) }
+            viewModel.setWakeTimeMinutes(minutes)
         },
         onBedTimeChange = { minutes ->
-            scope.launch { reminderSettingsRepository.setBedTimeMinutes(minutes) }
+            viewModel.setBedTimeMinutes(minutes)
         },
         onDisplayedWeekStartChange = { requestedWeekStart ->
             onRefreshCurrentDate()
@@ -469,34 +447,13 @@ fun MizunomiApp(
             }
         },
         onPrepareCsvExport = { onReady, onError ->
-            scope.launch {
-                runCatching {
-                    buildIntakeRecordsCsv(repository.getAllRecords())
-                }.onSuccess(onReady)
-                    .onFailure {
-                        onError("CSVデータを準備できませんでした。もう一度お試しください。")
-                    }
-            }
+            viewModel.prepareCsvExport(onReady, onError)
         },
         onAnalyzeCsvImport = { csvText, onReady, onError ->
-            scope.launch {
-                runCatching {
-                    val existingRecords = repository.getAllRecords()
-                    withContext(Dispatchers.Default) {
-                        parseIntakeRecordsCsv(csvText, existingRecords)
-                    }
-                }.onSuccess(onReady)
-                    .onFailure { error ->
-                        onError(error.message ?: "CSVファイルを解析できませんでした")
-                    }
-            }
+            viewModel.analyzeCsvImport(csvText, onReady, onError)
         },
         onImportCsvRecords = { records, onSuccess, onError ->
-            scope.launch {
-                runCatching { repository.importRecords(records) }
-                    .onSuccess(onSuccess)
-                    .onFailure { onError("CSVデータを保存できませんでした") }
-            }
+            viewModel.importCsvRecords(records, onSuccess, onError)
         },
     )
 }
