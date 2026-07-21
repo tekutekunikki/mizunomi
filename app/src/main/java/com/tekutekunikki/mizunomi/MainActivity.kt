@@ -97,18 +97,27 @@ import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
 import com.tekutekunikki.mizunomi.data.MaxCsvImportBytes
 import com.tekutekunikki.mizunomi.data.MizunomiDatabase
 import com.tekutekunikki.mizunomi.data.decodeUtf8Csv
+import com.tekutekunikki.mizunomi.domain.DailyIntake
+import com.tekutekunikki.mizunomi.domain.DrinkNotice
+import com.tekutekunikki.mizunomi.domain.DrinkTypes
+import com.tekutekunikki.mizunomi.domain.PaceState
+import com.tekutekunikki.mizunomi.domain.PaceStatus
+import com.tekutekunikki.mizunomi.domain.VoiceIntakeCandidate
+import com.tekutekunikki.mizunomi.domain.WeeklyTrendDays
+import com.tekutekunikki.mizunomi.domain.buildDrinkNotices
+import com.tekutekunikki.mizunomi.domain.buildPaceStatus
+import com.tekutekunikki.mizunomi.domain.buildWeeklyTrend
+import com.tekutekunikki.mizunomi.domain.parseVoiceIntake
+import com.tekutekunikki.mizunomi.domain.startOfWeek
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.text.NumberFormat
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.format.TextStyle
-import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -116,14 +125,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private const val WeeklyTrendDays = 7L
 private const val PastRecordLimitDays = 30L
-private const val SweetDrinkWarningThresholdMl = 500
-private const val BalancedDrinkTotalThresholdMl = 1000
-private const val WaterTeaMinimumThresholdMl = 500
-internal const val VoiceAmountMinMl = 50
-internal const val VoiceAmountMaxMl = 2_000
-private val MonthDayFormatter = DateTimeFormatter.ofPattern("M/d", Locale.JAPAN)
 private val WeekRangeFormatter = DateTimeFormatter.ofPattern("M/d(E)", Locale.JAPAN)
 
 private data class RecordFeedback(
@@ -175,18 +177,6 @@ private sealed interface CsvImportStatus {
     data class Error(val message: String) : CsvImportStatus
 }
 
-private val DrinkTypes = listOf(
-    "\u6C34",
-    "\u304A\u8336",
-    "\u30B3\u30FC\u30D2\u30FC",
-    "\u30B8\u30E5\u30FC\u30B9",
-    "\u30B9\u30DD\u30FC\u30C4\u30C9\u30EA\u30F3\u30AF",
-    "\u4E73\u98F2\u6599",
-    "\u70AD\u9178\u98F2\u6599",
-    "\u30A2\u30EB\u30B3\u30FC\u30EB",
-    "\u305D\u306E\u4ED6",
-)
-
 private val DrinkTypeIcons = mapOf(
     "\u6C34" to "\uD83D\uDCA7",
     "\u304A\u8336" to "\uD83C\uDF75",
@@ -203,18 +193,6 @@ private const val DefaultDrinkTypeIcon = "\uD83E\uDD64"
 
 private fun drinkTypeDisplayLabel(drinkType: String): String =
     "${DrinkTypeIcons[drinkType] ?: DefaultDrinkTypeIcon} $drinkType"
-
-private val SweetDrinkTypes = setOf(
-    "\u30B8\u30E5\u30FC\u30B9",
-    "\u30B9\u30DD\u30FC\u30C4\u30C9\u30EA\u30F3\u30AF",
-    "\u4E73\u98F2\u6599",
-    "\u70AD\u9178\u98F2\u6599",
-)
-
-private val WaterTeaDrinkTypes = setOf(
-    "\u6C34",
-    "\u304A\u8336",
-)
 
 private val HomeQuickRecordOptions = listOf(
     HomeQuickRecordOption(drinkType = "\u6C34", amountMl = 100),
@@ -2218,6 +2196,8 @@ private fun DrinkNoticeCard(notices: List<DrinkNotice>) {
 
 @Composable
 private fun PaceStatusCard(status: PaceStatus) {
+    val statusColor = paceStateColor(status.state)
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
@@ -2264,13 +2244,13 @@ private fun PaceStatusCard(status: PaceStatus) {
                     } else {
                         "\u9806\u8ABF\u3067\u3059"
                     },
-                    color = status.color,
+                    color = statusColor,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
             Text(
                 text = status.message,
-                color = status.color,
+                color = statusColor,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
             )
@@ -2282,6 +2262,13 @@ private fun PaceStatusCard(status: PaceStatus) {
         }
     }
 }
+
+private fun paceStateColor(state: PaceState): Color =
+    when (state) {
+        PaceState.OnTrack -> Color(0xFF168344)
+        PaceState.SlightlyBehind -> Color(0xFFB06C00)
+        PaceState.Behind -> Color(0xFFB3261E)
+    }
 
 @Composable
 private fun EditRecordDialog(
@@ -3210,81 +3197,6 @@ private fun validateRecordDateTime(
     else -> null
 }
 
-private fun buildWeeklyTrend(
-    records: List<IntakeRecord>,
-    displayedWeekStart: LocalDate,
-): List<DailyIntake> {
-    val zoneId = ZoneId.systemDefault()
-    val today = LocalDate.now()
-    val weekStart = displayedWeekStart.startOfWeek()
-    val totalsByDate = records.groupBy {
-        Instant.ofEpochMilli(it.timestamp)
-            .atZone(zoneId)
-            .toLocalDate()
-    }.mapValues { (_, dayRecords) ->
-        dayRecords.sumOf { it.amountMl }
-    }
-
-    return (0L until WeeklyTrendDays).map { dayOffset ->
-        val date = weekStart.plusDays(dayOffset)
-        DailyIntake(
-            date = date,
-            dayLabel = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.JAPAN),
-            dateLabel = date.format(MonthDayFormatter),
-            amountMl = totalsByDate[date] ?: 0,
-            isToday = date == today,
-        )
-    }
-}
-
-private fun LocalDate.startOfWeek(): LocalDate =
-    with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-
-private fun buildPaceStatus(
-    actualMl: Int,
-    now: LocalTime,
-    dailyGoalMl: Int,
-    wakeTimeMinutes: Int,
-    bedTimeMinutes: Int,
-): PaceStatus {
-    val currentTimeMinutes = now.hour * 60 + now.minute
-    val expectedMl = expectedIntakeForTime(
-        currentTimeMinutes = currentTimeMinutes,
-        wakeTimeMinutes = wakeTimeMinutes,
-        bedTimeMinutes = bedTimeMinutes,
-        dailyGoalMl = dailyGoalMl,
-    )
-    val remainingMl = (expectedMl - actualMl).coerceAtLeast(0)
-    val state = when {
-        actualMl >= expectedMl -> PaceState.OnTrack
-        expectedMl < scaleForDailyGoal(300, dailyGoalMl) -> PaceState.OnTrack
-        remainingMl < 300 -> PaceState.SlightlyBehind
-        else -> PaceState.Behind
-    }
-
-    return PaceStatus(
-        targetTimeLabel = now.format(DateTimeFormatter.ofPattern("H:mm")),
-        expectedMl = expectedMl,
-        actualMl = actualMl,
-        remainingMl = remainingMl,
-        message = when (state) {
-            PaceState.OnTrack -> "\u3044\u3044\u30DA\u30FC\u30B9\u3067\u3059"
-            PaceState.SlightlyBehind -> "\u5C11\u3057\u9045\u308C\u3066\u3044\u307E\u3059"
-            PaceState.Behind -> "\u304B\u306A\u308A\u9045\u308C\u3066\u3044\u307E\u3059"
-        },
-        detail = when (state) {
-            PaceState.OnTrack -> "\u3053\u306E\u8ABF\u5B50\u3067\u7121\u7406\u306A\u304F\u7D9A\u3051\u307E\u3057\u3087\u3046"
-            PaceState.SlightlyBehind -> "\u4E00\u676F\u98F2\u3093\u3067\u304A\u304D\u307E\u3057\u3087\u3046"
-            PaceState.Behind -> "\u4ECA\u65E5\u306E\u76EE\u6A19\u307E\u3067\u5C11\u3057\u9045\u308C\u3066\u3044\u307E\u3059"
-        },
-        color = when (state) {
-            PaceState.OnTrack -> Color(0xFF168344)
-            PaceState.SlightlyBehind -> Color(0xFFB06C00)
-            PaceState.Behind -> Color(0xFFB3261E)
-        },
-    )
-}
-
 private fun formatTimeMinutes(minutes: Int): String =
     "%02d:%02d".format(Locale.JAPAN, minutes / 60, minutes % 60)
 
@@ -3318,110 +3230,15 @@ private fun buildVoiceInputState(text: String?): VoiceInputState =
         )
     }
 
-internal fun parseVoiceIntake(text: String): VoiceIntakeCandidate? {
-    val normalizedText = text.normalizeDigits()
-    val amountMl = Regex("\\d+")
-        .findAll(normalizedText)
-        .mapNotNull { match -> match.value.toIntOrNull() }
-        .firstOrNull { amount -> amount in VoiceAmountMinMl..VoiceAmountMaxMl }
-        ?: return null
-    val drinkType = classifyVoiceDrinkType(normalizedText)
-
-    return VoiceIntakeCandidate(
-        drinkType = drinkType,
-        amountMl = amountMl,
-        rawText = text,
-    )
-}
-
-private fun classifyVoiceDrinkType(text: String): String =
-    when {
-        text.containsAny("ポカリ", "ポカリスエット", "アクエリアス", "スポーツドリンク") -> "\u30B9\u30DD\u30FC\u30C4\u30C9\u30EA\u30F3\u30AF"
-        text.containsAny("コーラ", "炭酸") -> "\u70AD\u9178\u98F2\u6599"
-        text.containsAny("牛乳", "カツゲン", "コーヒー牛乳", "乳飲料") -> "\u4E73\u98F2\u6599"
-        text.containsAny("ビール", "酒", "ワイン", "ハイボール") -> "\u30A2\u30EB\u30B3\u30FC\u30EB"
-        text.containsAny("午後ティー", "午後の紅茶", "ジュース", "オレンジ", "りんご") -> "\u30B8\u30E5\u30FC\u30B9"
-        text.containsAny("お茶", "緑茶", "麦茶") -> "\u304A\u8336"
-        text.containsAny("コーヒー", "ブラック") -> "\u30B3\u30FC\u30D2\u30FC"
-        text.contains("水") -> "\u6C34"
-        text.contains("その他") -> "\u305D\u306E\u4ED6"
-        else -> "\u305D\u306E\u4ED6"
-    }
-
-private fun String.containsAny(vararg keywords: String): Boolean =
-    keywords.any { contains(it) }
-
-private fun String.normalizeDigits(): String =
-    map { char ->
-        when (char) {
-            in '\uFF10'..'\uFF19' -> '0' + (char - '\uFF10')
-            else -> char
-        }
-    }.joinToString(separator = "")
-
-private fun buildDrinkNotices(
-    records: List<IntakeRecord>,
-    todayTotalMl: Int,
-): List<DrinkNotice> {
-    val sweetDrinkTotalMl = records
-        .filter { it.drinkType in SweetDrinkTypes }
-        .sumOf { it.amountMl }
-    val hasAlcohol = records.any { it.drinkType == "\u30A2\u30EB\u30B3\u30FC\u30EB" }
-    val waterTeaTotalMl = records
-        .filter { it.drinkType in WaterTeaDrinkTypes }
-        .sumOf { it.amountMl }
-
-    return buildList {
-        if (sweetDrinkTotalMl >= SweetDrinkWarningThresholdMl) {
-            add(
-                DrinkNotice(
-                    title = "\u7518\u3044\u98F2\u307F\u7269\u304C\u5C11\u3057\u591A\u3081\u3067\u3059",
-                    message = "\u6B21\u306E\u4E00\u676F\u306F\u6C34\u304B\u304A\u8336\u3092\u9078\u3093\u3067\u307F\u307E\u3057\u3087\u3046\u3002",
-                ),
-            )
-        }
-        if (hasAlcohol) {
-            add(
-                DrinkNotice(
-                    title = "\u30A2\u30EB\u30B3\u30FC\u30EB\u306E\u8A18\u9332\u304C\u3042\u308A\u307E\u3059",
-                    message = "\u4ECA\u65E5\u306F\u6C34\u3082\u4E00\u7DD2\u306B\u3068\u3063\u3066\u304A\u304D\u307E\u3057\u3087\u3046\u3002",
-                ),
-            )
-        }
-        if (
-            todayTotalMl >= BalancedDrinkTotalThresholdMl &&
-            waterTeaTotalMl < WaterTeaMinimumThresholdMl
-        ) {
-            add(
-                DrinkNotice(
-                    title = "\u6C34\u30FB\u304A\u8336\u304C\u5C11\u306A\u3081\u3067\u3059",
-                    message = "\u6B21\u306F\u3084\u3055\u3057\u304F\u4E00\u676F\u8DB3\u3057\u3066\u304A\u304D\u307E\u3057\u3087\u3046\u3002",
-                ),
-            )
-        }
-    }
-}
-
 private data class DrinkSummary(
     val drinkType: String,
     val amountMl: Int,
-)
-
-private data class DrinkNotice(
-    val title: String,
-    val message: String,
 )
 
 private data class VoiceInputState(
     val rawText: String?,
     val candidate: VoiceIntakeCandidate?,
     val errorMessage: String?,
-)
-
-internal data class VoiceIntakeCandidate(
-    val drinkType: String,
-    val amountMl: Int,
-    val rawText: String,
 )
 
 private enum class AppTab(
@@ -3432,30 +3249,6 @@ private enum class AppTab(
     Record(label = "記録", symbol = "+"),
     History(label = "履歴", symbol = "≡"),
     Settings(label = "設定", symbol = "⚙"),
-}
-
-private data class DailyIntake(
-    val date: LocalDate,
-    val dayLabel: String,
-    val dateLabel: String,
-    val amountMl: Int,
-    val isToday: Boolean,
-)
-
-private data class PaceStatus(
-    val targetTimeLabel: String,
-    val expectedMl: Int,
-    val actualMl: Int,
-    val remainingMl: Int,
-    val message: String,
-    val detail: String,
-    val color: Color,
-)
-
-private enum class PaceState {
-    OnTrack,
-    SlightlyBehind,
-    Behind,
 }
 
 @Preview(showBackground = true)
