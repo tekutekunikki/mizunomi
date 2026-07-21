@@ -47,14 +47,14 @@ internal fun buildPaceStatus(
         actualMl = actualMl,
         remainingMl = remainingMl,
         message = when (state) {
-            PaceState.OnTrack -> "\u3044\u3044\u30DA\u30FC\u30B9\u3067\u3059"
-            PaceState.SlightlyBehind -> "\u5C11\u3057\u9045\u308C\u3066\u3044\u307E\u3059"
-            PaceState.Behind -> "\u304B\u306A\u308A\u9045\u308C\u3066\u3044\u307E\u3059"
+            PaceState.OnTrack -> "いいペースです"
+            PaceState.SlightlyBehind -> "少し遅れています"
+            PaceState.Behind -> "かなり遅れています"
         },
         detail = when (state) {
-            PaceState.OnTrack -> "\u3053\u306E\u8ABF\u5B50\u3067\u7121\u7406\u306A\u304F\u7D9A\u3051\u307E\u3057\u3087\u3046"
-            PaceState.SlightlyBehind -> "\u4E00\u676F\u98F2\u3093\u3067\u304A\u304D\u307E\u3057\u3087\u3046"
-            PaceState.Behind -> "\u4ECA\u65E5\u306E\u76EE\u6A19\u307E\u3067\u5C11\u3057\u9045\u308C\u3066\u3044\u307E\u3059"
+            PaceState.OnTrack -> "この調子で無理なく続けましょう"
+            PaceState.SlightlyBehind -> "一杯飲んでおきましょう"
+            PaceState.Behind -> "今日の目標まで少し遅れています"
         },
         state = state,
     )

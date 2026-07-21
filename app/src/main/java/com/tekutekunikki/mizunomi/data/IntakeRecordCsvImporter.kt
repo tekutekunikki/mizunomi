@@ -69,7 +69,7 @@ fun parseIntakeRecordsCsv(
     if (rows.isEmpty()) throw CsvImportException("ヘッダーがありません")
 
     val header = rows.first().mapIndexed { index, value ->
-        if (index == 0) value.removePrefix("\uFEFF") else value
+        if (index == 0) value.removePrefix("﻿") else value
     }
     val columnIndexes = header.withIndex().associate { it.value to it.index }
     listOf("date", "time", "drinkType", "amountMl").forEach { requiredColumn ->

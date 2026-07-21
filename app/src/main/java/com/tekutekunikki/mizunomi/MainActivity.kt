@@ -43,11 +43,17 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -78,6 +84,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
@@ -109,6 +116,7 @@ import com.tekutekunikki.mizunomi.domain.buildPaceStatus
 import com.tekutekunikki.mizunomi.domain.buildWeeklyTrend
 import com.tekutekunikki.mizunomi.domain.parseVoiceIntake
 import com.tekutekunikki.mizunomi.domain.startOfWeek
+import com.tekutekunikki.mizunomi.ui.theme.MizunomiColors
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.text.NumberFormat
@@ -178,58 +186,58 @@ private sealed interface CsvImportStatus {
 }
 
 private val DrinkTypeIcons = mapOf(
-    "\u6C34" to "\uD83D\uDCA7",
-    "\u304A\u8336" to "\uD83C\uDF75",
-    "\u30B3\u30FC\u30D2\u30FC" to "\u2615",
-    "\u30B8\u30E5\u30FC\u30B9" to "\uD83E\uDDC3",
-    "\u30B9\u30DD\u30FC\u30C4\u30C9\u30EA\u30F3\u30AF" to "\uD83C\uDFC3",
-    "\u4E73\u98F2\u6599" to "\uD83E\uDD5B",
-    "\u70AD\u9178\u98F2\u6599" to "\uD83E\uDEE7",
-    "\u30A2\u30EB\u30B3\u30FC\u30EB" to "\uD83C\uDF7A",
-    "\u305D\u306E\u4ED6" to "\uD83E\uDD64",
+    "水" to "💧",
+    "お茶" to "🍵",
+    "コーヒー" to "☕",
+    "ジュース" to "🧃",
+    "スポーツドリンク" to "🏃",
+    "乳飲料" to "🥛",
+    "炭酸飲料" to "🫧",
+    "アルコール" to "🍺",
+    "その他" to "🥤",
 )
 
-private const val DefaultDrinkTypeIcon = "\uD83E\uDD64"
+private const val DefaultDrinkTypeIcon = "🥤"
 
 private fun drinkTypeDisplayLabel(drinkType: String): String =
     "${DrinkTypeIcons[drinkType] ?: DefaultDrinkTypeIcon} $drinkType"
 
 private val HomeQuickRecordOptions = listOf(
-    HomeQuickRecordOption(drinkType = "\u6C34", amountMl = 100),
-    HomeQuickRecordOption(drinkType = "\u304A\u8336", amountMl = 100),
-    HomeQuickRecordOption(drinkType = "\u30B3\u30FC\u30D2\u30FC", amountMl = 200),
+    HomeQuickRecordOption(drinkType = "水", amountMl = 100),
+    HomeQuickRecordOption(drinkType = "お茶", amountMl = 100),
+    HomeQuickRecordOption(drinkType = "コーヒー", amountMl = 200),
 )
 
 private val HydrationGuideTopics = listOf(
     HydrationGuideTopic(
-        title = "\u3053\u307E\u3081\u306B\u98F2\u3080",
-        description = "\u4E00\u5EA6\u306B\u305F\u304F\u3055\u3093\u3067\u306F\u306A\u304F\u3001\u5C11\u3057\u305A\u3064\u6C34\u5206\u3092\u3068\u308B\u3068\u7D9A\u3051\u3084\u3059\u304F\u306A\u308A\u307E\u3059\u3002",
+        title = "こまめに飲む",
+        description = "一度にたくさんではなく、少しずつ水分をとると続けやすくなります。",
         imageResId = R.drawable.hydrate_often,
-        contentDescription = "\u3053\u307E\u3081\u306A\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+        contentDescription = "こまめな水分補給を案内するイラスト",
     ),
     HydrationGuideTopic(
-        title = "\u8D77\u5E8A\u5F8C\u306B1\u676F",
-        description = "\u671D\u306E\u751F\u6D3B\u30EA\u30BA\u30E0\u306B\u5408\u308F\u305B\u3066\u3001\u307E\u305A\u306F1\u676F\u304B\u3089\u59CB\u3081\u307E\u3057\u3087\u3046\u3002",
+        title = "起床後に1杯",
+        description = "朝の生活リズムに合わせて、まずは1杯から始めましょう。",
         imageResId = R.drawable.morning_water,
-        contentDescription = "\u8D77\u5E8A\u5F8C\u306E\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+        contentDescription = "起床後の水分補給を案内するイラスト",
     ),
     HydrationGuideTopic(
-        title = "\u904B\u52D5\u524D\u5F8C\u306B\u88DC\u7D66",
-        description = "\u4F53\u3092\u52D5\u304B\u3059\u524D\u5F8C\u306F\u3001\u6C34\u5206\u88DC\u7D66\u3092\u610F\u8B58\u3057\u3084\u3059\u3044\u30BF\u30A4\u30DF\u30F3\u30B0\u3067\u3059\u3002",
+        title = "運動前後に補給",
+        description = "体を動かす前後は、水分補給を意識しやすいタイミングです。",
         imageResId = R.drawable.exercise_hydration,
-        contentDescription = "\u904B\u52D5\u524D\u5F8C\u306E\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+        contentDescription = "運動前後の水分補給を案内するイラスト",
     ),
     HydrationGuideTopic(
-        title = "\u5165\u6D74\u524D\u5F8C\u3082\u610F\u8B58",
-        description = "\u5165\u6D74\u306E\u524D\u5F8C\u306F\u3001\u5FD8\u308C\u305A\u306B\u6C34\u5206\u3092\u3068\u308B\u304D\u3063\u304B\u3051\u306B\u3057\u307E\u3057\u3087\u3046\u3002",
+        title = "入浴前後も意識",
+        description = "入浴の前後は、忘れずに水分をとるきっかけにしましょう。",
         imageResId = R.drawable.bath_hydration,
-        contentDescription = "\u5165\u6D74\u524D\u5F8C\u306E\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+        contentDescription = "入浴前後の水分補給を案内するイラスト",
     ),
     HydrationGuideTopic(
-        title = "\u5C31\u5BDD\u524D\u306F\u63A7\u3048\u3081\u306B",
-        description = "\u5BDD\u308B\u524D\u306F\u7121\u7406\u306B\u591A\u304F\u98F2\u307E\u305A\u3001\u6C17\u306B\u306A\u308B\u5834\u5408\u306F\u63A7\u3048\u3081\u306B\u3057\u307E\u3057\u3087\u3046\u3002",
+        title = "就寝前は控えめに",
+        description = "寝る前は無理に多く飲まず、気になる場合は控えめにしましょう。",
         imageResId = R.drawable.before_sleep_water,
-        contentDescription = "\u5C31\u5BDD\u524D\u306E\u63A7\u3048\u3081\u306A\u6C34\u5206\u88DC\u7D66\u3092\u6848\u5185\u3059\u308B\u30A4\u30E9\u30B9\u30C8",
+        contentDescription = "就寝前の控えめな水分補給を案内するイラスト",
     ),
 )
 
@@ -324,13 +332,13 @@ private fun MizunomiSplashScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF4F8FB))
+            .background(MizunomiColors.ScreenBackground)
             .padding(28.dp),
         contentAlignment = Alignment.Center,
     ) {
         Image(
             painter = painterResource(id = R.drawable.mizunomi_splash02),
-            contentDescription = "\u6C34\u5206\u88DC\u7D66\u3092\u4F1D\u3048\u308Bmizunomi\u306E\u30B9\u30D7\u30E9\u30C3\u30B7\u30E5\u753B\u50CF",
+            contentDescription = "水分補給を伝えるmizunomiのスプラッシュ画像",
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize(),
         )
@@ -511,7 +519,7 @@ fun MizunomiAppContent(
         uiScope.launch {
             val result = snackbarHostState.showSnackbar(
                 message = buildRecordSnackbarMessage(feedback, dailyGoalMl),
-                actionLabel = "\u5143\u306B\u623B\u3059",
+                actionLabel = "元に戻す",
                 withDismissAction = true,
                 duration = SnackbarDuration.Short,
             )
@@ -522,7 +530,7 @@ fun MizunomiAppContent(
                         snackbarHostState.currentSnackbarData?.dismiss()
                         uiScope.launch {
                             snackbarHostState.showSnackbar(
-                                message = "\u76F4\u524D\u306E\u8A18\u9332\u3092\u5143\u306B\u623B\u3057\u307E\u3057\u305F",
+                                message = "直前の記録を元に戻しました",
                                 duration = SnackbarDuration.Short,
                             )
                         }
@@ -531,7 +539,7 @@ fun MizunomiAppContent(
                         snackbarHostState.currentSnackbarData?.dismiss()
                         uiScope.launch {
                             snackbarHostState.showSnackbar(
-                                message = "\u5143\u306B\u623B\u305B\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044",
+                                message = "元に戻せませんでした。もう一度お試しください",
                                 duration = SnackbarDuration.Short,
                             )
                         }
@@ -657,7 +665,7 @@ fun MizunomiAppContent(
                     )
                 },
                 {
-                    recordDateTimeError = "\u8A18\u9332\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044"
+                    recordDateTimeError = "記録できませんでした。もう一度お試しください"
                 },
             )
         }
@@ -798,7 +806,7 @@ fun MizunomiAppContent(
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color(0xFFF4F8FB),
+            containerColor = MizunomiColors.ScreenBackground,
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             bottomBar = {
                 MizunomiBottomBar(
@@ -880,7 +888,7 @@ fun MizunomiAppContent(
                                 voiceInputState = VoiceInputState(
                                     rawText = null,
                                     candidate = null,
-                                    errorMessage = "\u7AEF\u672B\u306E\u97F3\u58F0\u5165\u529B\u3092\u8D77\u52D5\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
+                                    errorMessage = "端末の音声入力を起動できませんでした。",
                                 )
                             }
                         },
@@ -950,7 +958,7 @@ private fun MizunomiBottomBar(
     onTabSelected: (AppTab) -> Unit,
 ) {
     NavigationBar(
-        containerColor = Color.White,
+        containerColor = MizunomiColors.CardBackground,
         tonalElevation = 0.dp,
     ) {
         AppTab.entries.forEach { tab ->
@@ -959,10 +967,9 @@ private fun MizunomiBottomBar(
                 selected = selected,
                 onClick = { onTabSelected(tab) },
                 icon = {
-                    Text(
-                        text = tab.symbol,
-                        fontSize = 20.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    Icon(
+                        imageVector = tab.icon,
+                        contentDescription = tab.label,
                     )
                 },
                 label = {
@@ -973,11 +980,11 @@ private fun MizunomiBottomBar(
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Color(0xFF116DAE),
-                    selectedTextColor = Color(0xFF116DAE),
-                    indicatorColor = Color(0xFFE3F3FF),
-                    unselectedIconColor = Color(0xFF6C7A86),
-                    unselectedTextColor = Color(0xFF6C7A86),
+                    selectedIconColor = MizunomiColors.AccentBlueSelected,
+                    selectedTextColor = MizunomiColors.AccentBlueSelected,
+                    indicatorColor = MizunomiColors.SelectedBackground,
+                    unselectedIconColor = MizunomiColors.TextSecondary,
+                    unselectedTextColor = MizunomiColors.TextSecondary,
                 ),
             )
         }
@@ -1036,14 +1043,14 @@ private fun HydrationGuideSection(topics: List<HydrationGuideTopic>) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                text = "\u6C34\u5206\u88DC\u7D66\u30AC\u30A4\u30C9",
-                color = Color(0xFF25384A),
+                text = "水分補給ガイド",
+                color = MizunomiColors.TextPrimary,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "\u6BCE\u65E5\u7D9A\u3051\u3084\u3059\u3044\u30BF\u30A4\u30DF\u30F3\u30B0\u3092\u3001\u30A4\u30E9\u30B9\u30C8\u3067\u78BA\u8A8D\u3067\u304D\u307E\u3059\u3002",
-                color = Color(0xFF6C7A86),
+                text = "毎日続けやすいタイミングを、イラストで確認できます。",
+                color = MizunomiColors.TextSecondary,
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -1058,9 +1065,9 @@ private fun HydrationGuideSection(topics: List<HydrationGuideTopic>) {
         }
 
         Text(
-            text = "\u5FC5\u8981\u306A\u6C34\u5206\u91CF\u306F\u3001\u4F53\u683C\u30FB\u6D3B\u52D5\u91CF\u30FB\u6C17\u6E29\u30FB\u98DF\u4E8B\u5185\u5BB9\u306B\u3088\u3063\u3066\u5909\u308F\u308A\u307E\u3059\u3002\n" +
-                "\u4F53\u8ABF\u306B\u4E0D\u5B89\u304C\u3042\u308B\u5834\u5408\u306F\u3001\u7121\u7406\u305B\u305A\u5C02\u9580\u5BB6\u306B\u76F8\u8AC7\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-            color = Color(0xFF6C7A86),
+            text = "必要な水分量は、体格・活動量・気温・食事内容によって変わります。\n" +
+                "体調に不安がある場合は、無理せず専門家に相談してください。",
+            color = MizunomiColors.TextSecondary,
             style = MaterialTheme.typography.bodySmall,
         )
     }
@@ -1071,7 +1078,7 @@ private fun HydrationGuideCard(topic: HydrationGuideTopic) {
     Card(
         modifier = Modifier.width(268.dp),
         shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -1083,7 +1090,7 @@ private fun HydrationGuideCard(topic: HydrationGuideTopic) {
                     .fillMaxWidth()
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFFEAF5FC)),
+                    .background(MizunomiColors.SoftBlueBackground),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
@@ -1097,7 +1104,7 @@ private fun HydrationGuideCard(topic: HydrationGuideTopic) {
             }
             Text(
                 text = topic.title,
-                color = Color(0xFF25384A),
+                color = MizunomiColors.TextPrimary,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -1105,7 +1112,7 @@ private fun HydrationGuideCard(topic: HydrationGuideTopic) {
             )
             Text(
                 text = topic.description,
-                color = Color(0xFF526777),
+                color = MizunomiColors.TextSecondaryDark,
                 style = MaterialTheme.typography.bodySmall,
                 lineHeight = 18.sp,
             )
@@ -1124,7 +1131,7 @@ private fun HomeQuickRecordCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -1139,13 +1146,13 @@ private fun HomeQuickRecordCard(
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = "クイック記録",
-                        color = Color(0xFF25384A),
+                        color = MizunomiColors.TextPrimary,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         text = "よく使う記録をワンタップで追加",
-                        color = Color(0xFF6C7A86),
+                        color = MizunomiColors.TextSecondary,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -1168,8 +1175,8 @@ private fun HomeQuickRecordCard(
                         shape = RoundedCornerShape(18.dp),
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = Color(0xFFF7FBFE),
-                            contentColor = Color(0xFF116DAE),
+                            containerColor = MizunomiColors.CardBackgroundSoft,
+                            contentColor = MizunomiColors.AccentBlueSelected,
                         ),
                     ) {
                         Text(
@@ -1188,7 +1195,7 @@ private fun HomeQuickRecordCard(
                 is HomeQuickRecordStatus.Success -> {
                     Text(
                         text = "${drinkTypeDisplayLabel(status.drinkType)} ${status.amountMl}mlを記録しました",
-                        color = Color(0xFF168344),
+                        color = MizunomiColors.AchievedGreen,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -1197,7 +1204,7 @@ private fun HomeQuickRecordCard(
                 HomeQuickRecordStatus.Error -> {
                     Text(
                         text = "記録できませんでした。もう一度お試しください",
-                        color = Color(0xFFB3261E),
+                        color = MizunomiColors.DangerRed,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -1276,7 +1283,7 @@ private fun RecordFeedbackCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (goalAchieved) Color(0xFFDCF6E6) else Color(0xFFE7F6ED),
+            containerColor = if (goalAchieved) MizunomiColors.SuccessChipBackground else MizunomiColors.SuccessBackgroundAlt,
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
@@ -1290,7 +1297,7 @@ private fun RecordFeedbackCard(
                 } else {
                     "✓ 記録しました"
                 },
-                color = Color(0xFF168344),
+                color = MizunomiColors.AchievedGreen,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
@@ -1306,7 +1313,7 @@ private fun RecordFeedbackCard(
                     append("ml")
                     if (goalAchieved) append(" を記録しました")
                 },
-                color = Color(0xFF173B2A),
+                color = MizunomiColors.SuccessGreenDeep,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1317,13 +1324,13 @@ private fun RecordFeedbackCard(
                 } else {
                     "この日の合計 ${numberFormat.format(feedback.dayTotalMl)}ml"
                 },
-                color = Color(0xFF315C47),
+                color = MizunomiColors.SuccessGreenSoftText,
                 style = MaterialTheme.typography.bodyMedium,
             )
             if (isToday && !goalAchieved) {
                 Text(
                     text = "あと ${numberFormat.format(remainingMl)}ml",
-                    color = Color(0xFF315C47),
+                    color = MizunomiColors.SuccessGreenSoftText,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                 )
@@ -1362,8 +1369,8 @@ private fun HistoryTabContent(
         }
         item {
             Text(
-                text = "Recent records",
-                color = Color(0xFF25384A),
+                text = "最近の記録",
+                color = MizunomiColors.TextPrimary,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1499,7 +1506,7 @@ private fun MizunomiTabList(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF4F8FB))
+            .background(MizunomiColors.ScreenBackground)
             .padding(contentPadding),
         state = listState,
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
@@ -1535,11 +1542,11 @@ private fun buildRecordSnackbarMessage(
     val drinkLabel = drinkTypeDisplayLabel(feedback.drinkType)
 
     return if (feedback.dayTotalMl >= dailyGoalMl) {
-        "\u4ECA\u65E5\u306E\u76EE\u6A19\u3092\u9054\u6210\u3057\u307E\u3057\u305F\n" +
-            "$drinkLabel ${numberFormat.format(feedback.amountMl)}ml\u3092\u8A18\u9332\u30FB${totalText}ml\u9054\u6210"
+        "今日の目標を達成しました\n" +
+            "$drinkLabel ${numberFormat.format(feedback.amountMl)}mlを記録・${totalText}ml達成"
     } else {
-        "$drinkLabel ${numberFormat.format(feedback.amountMl)}ml\u3092\u8A18\u9332\u3057\u307E\u3057\u305F\n" +
-            "\u4ECA\u65E5\u306E\u5408\u8A08 ${totalText}ml / ${goalText}ml\u30FB\u3042\u3068${numberFormat.format(remainingMl)}ml"
+        "$drinkLabel ${numberFormat.format(feedback.amountMl)}mlを記録しました\n" +
+            "今日の合計 ${totalText}ml / ${goalText}ml・あと${numberFormat.format(remainingMl)}ml"
     }
 }
 
@@ -1551,13 +1558,13 @@ private fun TabHeader(
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             text = title,
-            color = Color(0xFF13314B),
+            color = MizunomiColors.AccentBlueDeep,
             fontSize = 30.sp,
             fontWeight = FontWeight.Bold,
         )
         Text(
             text = subtitle,
-            color = Color(0xFF6C7A86),
+            color = MizunomiColors.TextSecondary,
             style = MaterialTheme.typography.bodyMedium,
         )
     }
@@ -1568,13 +1575,13 @@ private fun EmptyHistoryCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Text(
             text = "まだ記録がありません。記録タブから最初の一杯を追加しましょう。",
             modifier = Modifier.padding(18.dp),
-            color = Color(0xFF6C7A86),
+            color = MizunomiColors.TextSecondary,
             style = MaterialTheme.typography.bodyMedium,
         )
     }
@@ -1590,7 +1597,7 @@ private fun SettingsFoundationCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -1599,7 +1606,7 @@ private fun SettingsFoundationCard(
         ) {
             Text(
                 text = "基本設定",
-                color = Color(0xFF25384A),
+                color = MizunomiColors.TextPrimary,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1613,12 +1620,12 @@ private fun SettingsFoundationCard(
             )
             Text(
                 text = "音声入力について",
-                color = Color(0xFF25384A),
+                color = MizunomiColors.TextPrimary,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
                 text = "音声入力は端末の音声認識機能を利用します。\n認識精度や通信の有無は端末環境に依存します。",
-                color = Color(0xFF6C7A86),
+                color = MizunomiColors.TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -1636,7 +1643,7 @@ private fun LifestyleSettingsCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -1645,7 +1652,7 @@ private fun LifestyleSettingsCard(
         ) {
             Text(
                 text = "生活リズム",
-                color = Color(0xFF25384A),
+                color = MizunomiColors.TextPrimary,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1664,7 +1671,7 @@ private fun LifestyleSettingsCard(
             errorMessage?.let { message ->
                 Text(
                     text = message,
-                    color = Color(0xFFB3261E),
+                    color = MizunomiColors.DangerRed,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
                 )
@@ -1692,16 +1699,16 @@ private fun TimeSettingRow(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(text = label, color = Color(0xFF31485B), fontWeight = FontWeight.Medium)
+            Text(text = label, color = MizunomiColors.TextBody, fontWeight = FontWeight.Medium)
             Text(
                 text = supportingText,
-                color = Color(0xFF6C7A86),
+                color = MizunomiColors.TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
         }
         Text(
             text = "$value  ›",
-            color = Color(0xFF116DAE),
+            color = MizunomiColors.AccentBlueSelected,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium,
         )
@@ -1721,7 +1728,7 @@ private fun DataManagementCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -1739,25 +1746,25 @@ private fun DataManagementCard(
                 ) {
                     Text(
                         text = "データ管理",
-                        color = Color(0xFF25384A),
+                        color = MizunomiColors.TextPrimary,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         text = "記録を端末に保存",
-                        color = Color(0xFF6C7A86),
+                        color = MizunomiColors.TextSecondary,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 Card(
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F3FB)),
+                    colors = CardDefaults.cardColors(containerColor = MizunomiColors.SoftBlueBackgroundAlt),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 ) {
                     Text(
                         text = "CSV",
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                        color = Color(0xFF116DAE),
+                        color = MizunomiColors.AccentBlueSelected,
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.labelMedium,
                     )
@@ -1765,14 +1772,14 @@ private fun DataManagementCard(
             }
             Text(
                 text = "すべての水分記録を、日時・飲み物・量・メモを含むCSVファイルに書き出します。",
-                color = Color(0xFF526777),
+                color = MizunomiColors.TextSecondaryDark,
                 style = MaterialTheme.typography.bodyMedium,
             )
             Button(
                 onClick = onExportCsv,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isBusy,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1683D8)),
+                colors = ButtonDefaults.buttonColors(containerColor = MizunomiColors.AccentBlueStrong),
                 shape = RoundedCornerShape(16.dp),
                 contentPadding = PaddingValues(vertical = 14.dp),
             ) {
@@ -1804,14 +1811,14 @@ private fun DataManagementCard(
             when (exportStatus) {
                 CsvExportStatus.Success -> Text(
                     text = "✓ CSVファイルを書き出しました",
-                    color = Color(0xFF168344),
+                    color = MizunomiColors.AchievedGreen,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
 
                 is CsvExportStatus.Error -> Text(
                     text = exportStatus.message,
-                    color = Color(0xFFB3261E),
+                    color = MizunomiColors.DangerRed,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                 )
@@ -1824,18 +1831,18 @@ private fun DataManagementCard(
                 ) {
                     Text(
                         text = "✓ ${importStatus.importedCount}件を読み込みました",
-                        color = Color(0xFF168344),
+                        color = MizunomiColors.AchievedGreen,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         text = "${importStatus.skippedCount}件をスキップ（重複 ${importStatus.duplicateCount}件）",
-                        color = Color(0xFF526777),
+                        color = MizunomiColors.TextSecondaryDark,
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (importStatus.unknownDrinkTypeCount > 0) {
                         Text(
                             text = "未知の飲み物 ${importStatus.unknownDrinkTypeCount}件を「その他」で読み込みました",
-                            color = Color(0xFF526777),
+                            color = MizunomiColors.TextSecondaryDark,
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -1843,7 +1850,7 @@ private fun DataManagementCard(
 
                 is CsvImportStatus.Error -> Text(
                     text = importStatus.message,
-                    color = Color(0xFFB3261E),
+                    color = MizunomiColors.DangerRed,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
                 )
@@ -1878,20 +1885,20 @@ private fun CsvImportPreviewDialog(
                     Text(
                         text = "確認が必要な行",
                         modifier = Modifier.padding(top = 8.dp),
-                        color = Color(0xFF25384A),
+                        color = MizunomiColors.TextPrimary,
                         fontWeight = FontWeight.SemiBold,
                     )
                     preview.errors.forEach { error ->
                         Text(
                             text = "${error.rowNumber}行目: ${error.reason}",
-                            color = Color(0xFF8A5A00),
+                            color = MizunomiColors.WarningAmberText,
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
                     if (preview.hiddenErrorCount > 0) {
                         Text(
                             text = "ほか${preview.hiddenErrorCount}件のエラーがあります",
-                            color = Color(0xFF8A5A00),
+                            color = MizunomiColors.WarningAmberText,
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -1900,7 +1907,7 @@ private fun CsvImportPreviewDialog(
                 if (preview.records.isEmpty()) {
                     Text(
                         text = "読み込み可能な記録がありません。",
-                        color = Color(0xFFB3261E),
+                        color = MizunomiColors.DangerRed,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -1929,8 +1936,8 @@ private fun ImportPreviewCount(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(text = label, color = Color(0xFF526777))
-        Text(text = "$count 件", color = Color(0xFF173B2A), fontWeight = FontWeight.Bold)
+        Text(text = label, color = MizunomiColors.TextSecondaryDark)
+        Text(text = "$count 件", color = MizunomiColors.SuccessGreenDeep, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -1955,17 +1962,17 @@ private fun DailyGoalSettingRow(
         ) {
             Text(
                 text = "1日の目標水分量",
-                color = Color(0xFF31485B),
+                color = MizunomiColors.TextBody,
             )
             Text(
                 text = "タップして変更",
-                color = Color(0xFF6C7A86),
+                color = MizunomiColors.TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
         }
         Text(
             text = "${numberFormat.format(dailyGoalMl)} ml  ›",
-            color = Color(0xFF116DAE),
+            color = MizunomiColors.AccentBlueSelected,
             fontWeight = FontWeight.SemiBold,
         )
     }
@@ -1987,7 +1994,7 @@ private fun DailyGoalSelectionDialog(
                 Text(
                     text = "毎日の目標を選んでください。",
                     modifier = Modifier.padding(bottom = 8.dp),
-                    color = Color(0xFF6C7A86),
+                    color = MizunomiColors.TextSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 DailyGoalOptionsMl.forEach { goalMl ->
@@ -2005,7 +2012,7 @@ private fun DailyGoalSelectionDialog(
                         Text(
                             text = "${numberFormat.format(goalMl)} ml",
                             modifier = Modifier.padding(start = 8.dp),
-                            color = Color(0xFF25384A),
+                            color = MizunomiColors.TextPrimary,
                             style = MaterialTheme.typography.bodyLarge,
                         )
                     }
@@ -2034,11 +2041,11 @@ private fun ReminderToggleRow(
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = "水分補給リマインド",
-                color = Color(0xFF31485B),
+                color = MizunomiColors.TextBody,
             )
             Text(
                 text = if (enabled) "ON" else "OFF",
-                color = if (enabled) Color(0xFF116DAE) else Color(0xFF6C7A86),
+                color = if (enabled) MizunomiColors.AccentBlueSelected else MizunomiColors.TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -2047,11 +2054,11 @@ private fun ReminderToggleRow(
             checked = enabled,
             onCheckedChange = onEnabledChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF1683D8),
-                uncheckedThumbColor = Color.White,
-                uncheckedTrackColor = Color(0xFFB8C7D1),
-                uncheckedBorderColor = Color(0xFFB8C7D1),
+                checkedThumbColor = MizunomiColors.CardBackground,
+                checkedTrackColor = MizunomiColors.AccentBlueStrong,
+                uncheckedThumbColor = MizunomiColors.CardBackground,
+                uncheckedTrackColor = MizunomiColors.BorderMuted,
+                uncheckedBorderColor = MizunomiColors.BorderMuted,
             ),
         )
     }
@@ -2083,7 +2090,7 @@ private fun VoiceIntakeDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "\u97F3\u58F0\u5165\u529B\u306E\u7D50\u679C")
+            Text(text = "音声入力の結果")
         },
         text = {
             Column(
@@ -2094,23 +2101,23 @@ private fun VoiceIntakeDialog(
             ) {
                 state.rawText?.let { rawText ->
                     Text(
-                        text = "\u8A8D\u8B58\u7D50\u679C\uFF1A$rawText",
-                        color = Color(0xFF6C7A86),
+                        text = "認識結果：$rawText",
+                        color = MizunomiColors.TextSecondary,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
 
                 if (state.candidate != null && !isEditing) {
                     Text(
-                        text = "${drinkTypeDisplayLabel(state.candidate.drinkType)} ${state.candidate.amountMl}ml \u3068\u3057\u3066\u8A18\u9332\u3057\u307E\u3059\u304B\uFF1F",
-                        color = Color(0xFF31485B),
+                        text = "${drinkTypeDisplayLabel(state.candidate.drinkType)} ${state.candidate.amountMl}ml として記録しますか？",
+                        color = MizunomiColors.TextBody,
                         fontWeight = FontWeight.SemiBold,
                     )
                 } else {
                     Text(
                         text = state.errorMessage
-                            ?: "\u98F2\u307F\u7269\u3068\u91CF\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
-                        color = Color(0xFF31485B),
+                            ?: "飲み物と量を選んでください。",
+                        color = MizunomiColors.TextBody,
                         fontWeight = FontWeight.SemiBold,
                     )
                     ChoiceRow(
@@ -2134,24 +2141,24 @@ private fun VoiceIntakeDialog(
                         onSave(state.candidate.drinkType, state.candidate.amountMl)
                     },
                 ) {
-                    Text(text = "\u4FDD\u5B58")
+                    Text(text = "保存")
                 }
             } else {
                 TextButton(
                     onClick = { onSave(selectedDrinkType, selectedAmountMl) },
                 ) {
-                    Text(text = "\u4FDD\u5B58")
+                    Text(text = "保存")
                 }
             }
         },
         dismissButton = {
             if (state.candidate != null && !isEditing) {
                 TextButton(onClick = { isEditing = true }) {
-                    Text(text = "\u4FEE\u6B63")
+                    Text(text = "修正")
                 }
             } else {
                 TextButton(onClick = onDismiss) {
-                    Text(text = "Cancel")
+                    Text(text = "キャンセル")
                 }
             }
         },
@@ -2163,7 +2170,7 @@ private fun DrinkNoticeCard(notices: List<DrinkNotice>) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -2171,8 +2178,8 @@ private fun DrinkNoticeCard(notices: List<DrinkNotice>) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "\u98F2\u307F\u7269\u30D0\u30E9\u30F3\u30B9",
-                color = Color(0xFF25384A),
+                text = "飲み物バランス",
+                color = MizunomiColors.TextPrimary,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -2180,12 +2187,12 @@ private fun DrinkNoticeCard(notices: List<DrinkNotice>) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = notice.title,
-                        color = Color(0xFF8A5A00),
+                        color = MizunomiColors.WarningAmberText,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         text = notice.message,
-                        color = Color(0xFF6C7A86),
+                        color = MizunomiColors.TextSecondary,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -2201,7 +2208,7 @@ private fun PaceStatusCard(status: PaceStatus) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -2209,8 +2216,8 @@ private fun PaceStatusCard(status: PaceStatus) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "\u4ECA\u65E5\u306E\u30DA\u30FC\u30B9",
-                color = Color(0xFF25384A),
+                text = "今日のペース",
+                color = MizunomiColors.TextPrimary,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -2219,13 +2226,13 @@ private fun PaceStatusCard(status: PaceStatus) {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "\u76EE\u5B89\uFF1A${status.targetTimeLabel}\u307E\u3067\u306B",
-                    color = Color(0xFF6C7A86),
+                    text = "目安：${status.targetTimeLabel}までに",
+                    color = MizunomiColors.TextSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
                     text = "${status.expectedMl} ml",
-                    color = Color(0xFF0F2F47),
+                    color = MizunomiColors.TextPrimaryDark,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -2234,15 +2241,15 @@ private fun PaceStatusCard(status: PaceStatus) {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "\u73FE\u5728\uFF1A${status.actualMl} ml",
-                    color = Color(0xFF31485B),
+                    text = "現在：${status.actualMl} ml",
+                    color = MizunomiColors.TextBody,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     text = if (status.remainingMl > 0) {
-                        "\u3042\u3068 ${status.remainingMl} ml"
+                        "あと ${status.remainingMl} ml"
                     } else {
-                        "\u9806\u8ABF\u3067\u3059"
+                        "順調です"
                     },
                     color = statusColor,
                     fontWeight = FontWeight.SemiBold,
@@ -2256,7 +2263,7 @@ private fun PaceStatusCard(status: PaceStatus) {
             )
             Text(
                 text = status.detail,
-                color = Color(0xFF6C7A86),
+                color = MizunomiColors.TextSecondary,
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -2265,9 +2272,9 @@ private fun PaceStatusCard(status: PaceStatus) {
 
 private fun paceStateColor(state: PaceState): Color =
     when (state) {
-        PaceState.OnTrack -> Color(0xFF168344)
-        PaceState.SlightlyBehind -> Color(0xFFB06C00)
-        PaceState.Behind -> Color(0xFFB3261E)
+        PaceState.OnTrack -> MizunomiColors.AchievedGreen
+        PaceState.SlightlyBehind -> MizunomiColors.WarningAmber
+        PaceState.Behind -> MizunomiColors.DangerRed
     }
 
 @Composable
@@ -2284,7 +2291,7 @@ private fun EditRecordDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "Edit record")
+            Text(text = "記録を編集")
         },
         text = {
             Column(
@@ -2295,7 +2302,7 @@ private fun EditRecordDialog(
             ) {
                 Text(
                     text = record.timestamp.toRecordDateTimeText(),
-                    color = Color(0xFF6C7A86),
+                    color = MizunomiColors.TextSecondary,
                     style = MaterialTheme.typography.bodySmall,
                 )
                 ChoiceRow(
@@ -2315,12 +2322,12 @@ private fun EditRecordDialog(
             TextButton(
                 onClick = { onSave(selectedDrinkType, selectedAmountMl) },
             ) {
-                Text(text = "Save")
+                Text(text = "保存")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text(text = "Cancel")
+                Text(text = "キャンセル")
             }
         },
     )
@@ -2335,23 +2342,23 @@ private fun DeleteRecordDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(text = "\u3053\u306E\u8A18\u9332\u3092\u524A\u9664\u3057\u307E\u3059\u304B\uFF1F")
+            Text(text = "この記録を削除しますか？")
         },
         text = {
             Text(
                 text = "${drinkTypeDisplayLabel(record.drinkType)} ${record.amountMl} ml",
-                color = Color(0xFF31485B),
+                color = MizunomiColors.TextBody,
                 fontWeight = FontWeight.SemiBold,
             )
         },
         confirmButton = {
             TextButton(onClick = onConfirmDelete) {
-                Text(text = "\u524A\u9664", color = Color(0xFFB3261E))
+                Text(text = "削除", color = MizunomiColors.DangerRed)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text(text = "\u30AD\u30E3\u30F3\u30BB\u30EB")
+                Text(text = "キャンセル")
             }
         },
     )
@@ -2371,7 +2378,7 @@ private fun SummaryCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isGoalAchieved) Color(0xFFF2FBF6) else Color.White,
+            containerColor = if (isGoalAchieved) MizunomiColors.GoalAchievedBackground else MizunomiColors.CardBackground,
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
@@ -2380,13 +2387,13 @@ private fun SummaryCard(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "Today's intake",
-                color = Color(0xFF6C7A86),
+                text = "今日の水分量",
+                color = MizunomiColors.TextSecondary,
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
                 text = "$todayTotalMl ml",
-                color = Color(0xFF0F2F47),
+                color = MizunomiColors.TextPrimaryDark,
                 fontSize = 40.sp,
                 fontWeight = FontWeight.Bold,
                 lineHeight = 44.sp,
@@ -2399,26 +2406,26 @@ private fun SummaryCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(10.dp),
-                color = if (isGoalAchieved) Color(0xFF2EAD5B) else Color(0xFF2A9DF4),
-                trackColor = Color(0xFFE5EEF5),
+                color = if (isGoalAchieved) MizunomiColors.SuccessGreen else MizunomiColors.AccentBlueProgress,
+                trackColor = MizunomiColors.ProgressTrack,
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "Goal ${numberFormat.format(dailyGoalMl)} ml",
-                    color = Color(0xFF6C7A86),
+                    text = "目標 ${numberFormat.format(dailyGoalMl)} ml",
+                    color = MizunomiColors.TextSecondary,
                 )
-                Text(text = "$progressPercent%", color = Color(0xFF0F6FAE), fontWeight = FontWeight.SemiBold)
+                Text(text = "$progressPercent%", color = MizunomiColors.AccentBlue, fontWeight = FontWeight.SemiBold)
             }
             Text(
                 text = if (isGoalAchieved) {
-                    "\u304A\u3081\u3067\u3068\u3046\u3054\u3056\u3044\u307E\u3059\uFF01"
+                    "おめでとうございます！"
                 } else {
-                    "\u3042\u3068 $remainingMl ml"
+                    "あと $remainingMl ml"
                 },
-                color = if (isGoalAchieved) Color(0xFF1F8F4D) else Color(0xFF2D6A9F),
+                color = if (isGoalAchieved) MizunomiColors.SuccessGreenText else MizunomiColors.AccentBlueMessage,
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -2429,7 +2436,7 @@ private fun SummaryCard(
 private fun AchievementBadge() {
     Card(
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFE2F7EA)),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.SuccessBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Row(
@@ -2438,20 +2445,20 @@ private fun AchievementBadge() {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "\u2713",
-                color = Color(0xFF168344),
+                text = "✓",
+                color = MizunomiColors.AchievedGreen,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
             )
             Column {
                 Text(
-                    text = "\u4ECA\u65E5\u306E\u76EE\u6A19\u3092\u9054\u6210\u3057\u307E\u3057\u305F\uFF01",
-                    color = Color(0xFF146C3A),
+                    text = "今日の目標を達成しました！",
+                    color = MizunomiColors.SuccessGreenDark,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "\u9054\u6210\u30D0\u30C3\u30B8",
-                    color = Color(0xFF3E7A56),
+                    text = "達成バッジ",
+                    color = MizunomiColors.SuccessGreenBody,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -2498,7 +2505,7 @@ private fun WeeklyTrendCard(
                 )
             },
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -2512,15 +2519,15 @@ private fun WeeklyTrendCard(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text = "\u9031\u9593\u306E\u6C34\u5206\u6442\u53D6",
-                        color = Color(0xFF25384A),
+                        text = "週間の水分摂取",
+                        color = MizunomiColors.TextPrimary,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                     if (isCurrentWeek) {
                         Text(
-                            text = "\u4ECA\u9031",
-                            color = Color(0xFF0F6FAE),
+                            text = "今週",
+                            color = MizunomiColors.AccentBlue,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                         )
@@ -2528,7 +2535,7 @@ private fun WeeklyTrendCard(
                 }
                 if (!isCurrentWeek) {
                     TextButton(onClick = { onWeekStartChange(normalizedCurrentWeekStart) }) {
-                        Text(text = "\u4ECA\u9031\u3078\u623B\u308B")
+                        Text(text = "今週へ戻る")
                     }
                 }
             }
@@ -2536,7 +2543,7 @@ private fun WeeklyTrendCard(
             Text(
                 text = "${normalizedWeekStart.format(WeekRangeFormatter)} - " +
                     weekEnd.format(WeekRangeFormatter),
-                color = Color(0xFF526777),
+                color = MizunomiColors.TextSecondaryDark,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
             )
@@ -2548,13 +2555,13 @@ private fun WeeklyTrendCard(
                 TextButton(
                     onClick = { onWeekStartChange(normalizedWeekStart.minusWeeks(1)) },
                 ) {
-                    Text(text = "\u2039 \u524D\u306E\u9031")
+                    Text(text = "‹ 前の週")
                 }
                 TextButton(
                     onClick = { onWeekStartChange(normalizedWeekStart.plusWeeks(1)) },
                     enabled = canGoToNextWeek,
                 ) {
-                    Text(text = "\u6B21\u306E\u9031 \u203A")
+                    Text(text = "次の週 ›")
                 }
             }
 
@@ -2563,20 +2570,20 @@ private fun WeeklyTrendCard(
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 WeeklyMetric(
-                    label = "\u5408\u8A08",
+                    label = "合計",
                     value = "${numberFormat.format(weeklyTotalMl)}ml",
                     modifier = Modifier.weight(1f),
                 )
                 WeeklyMetric(
-                    label = "\u5E73\u5747",
-                    value = "${numberFormat.format(dailyAverageMl)}ml/\u65E5",
+                    label = "平均",
+                    value = "${numberFormat.format(dailyAverageMl)}ml/日",
                     modifier = Modifier.weight(1f),
                 )
             }
 
             Text(
-                text = "\u76EE\u6A19 ${numberFormat.format(dailyGoalMl)}ml/\u65E5",
-                color = Color(0xFF5C6F7E),
+                text = "目標 ${numberFormat.format(dailyGoalMl)}ml/日",
+                color = MizunomiColors.TextMutedBlue,
                 style = MaterialTheme.typography.bodySmall,
             )
 
@@ -2609,12 +2616,12 @@ private fun WeeklyMetric(
     Column(modifier = modifier) {
         Text(
             text = label,
-            color = Color(0xFF6C7A86),
+            color = MizunomiColors.TextSecondary,
             style = MaterialTheme.typography.labelMedium,
         )
         Text(
             text = value,
-            color = Color(0xFF17324A),
+            color = MizunomiColors.TextPrimaryNavy,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -2635,11 +2642,11 @@ private fun WeeklyBarColumn(
         (day.amountMl.toFloat() / maxBarAmount).coerceIn(0f, 1f)
     }
     val barColor = when {
-        day.amountMl >= dailyGoalMl -> Color(0xFF2EAD5B)
-        day.isToday -> Color(0xFF1683D8)
-        else -> Color(0xFF76B9E8)
+        day.amountMl >= dailyGoalMl -> MizunomiColors.SuccessGreen
+        day.isToday -> MizunomiColors.AccentBlueStrong
+        else -> MizunomiColors.AccentBlueLight
     }
-    val labelColor = if (day.isToday) Color(0xFF0F6FAE) else Color(0xFF6C7A86)
+    val labelColor = if (day.isToday) MizunomiColors.AccentBlue else MizunomiColors.TextSecondary
 
     Column(
         modifier = modifier.fillMaxHeight(),
@@ -2647,15 +2654,15 @@ private fun WeeklyBarColumn(
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Text(
-            text = if (day.isToday) "\u4ECA\u65E5" else "",
-            color = Color(0xFF0F6FAE),
+            text = if (day.isToday) "今日" else "",
+            color = MizunomiColors.AccentBlue,
             fontWeight = FontWeight.Bold,
             fontSize = 10.sp,
             maxLines = 1,
         )
         Text(
             text = day.amountMl.toString(),
-            color = if (day.isToday) Color(0xFF17324A) else Color(0xFF5C6F7E),
+            color = if (day.isToday) MizunomiColors.TextPrimaryNavy else MizunomiColors.TextMutedBlue,
             fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
             fontSize = 10.sp,
             maxLines = 1,
@@ -2665,7 +2672,7 @@ private fun WeeklyBarColumn(
                 .weight(1f)
                 .width(24.dp)
                 .background(
-                    color = Color(0xFFEAF2F7),
+                    color = MizunomiColors.BarTrack,
                     shape = RoundedCornerShape(8.dp),
                 ),
             contentAlignment = Alignment.BottomCenter,
@@ -2703,7 +2710,7 @@ private fun TypeSummaryCard(summaries: List<DrinkSummary>) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -2711,8 +2718,8 @@ private fun TypeSummaryCard(summaries: List<DrinkSummary>) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "By drink type",
-                color = Color(0xFF25384A),
+                text = "飲み物別",
+                color = MizunomiColors.TextPrimary,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -2724,12 +2731,12 @@ private fun TypeSummaryCard(summaries: List<DrinkSummary>) {
                 ) {
                     Text(
                         text = drinkTypeDisplayLabel(summary.drinkType),
-                        color = Color(0xFF31485B),
+                        color = MizunomiColors.TextBody,
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
                         text = "${summary.amountMl} ml",
-                        color = Color(0xFF0F2F47),
+                        color = MizunomiColors.TextPrimaryDark,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -2768,7 +2775,7 @@ private fun AddIntakeCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
@@ -2776,8 +2783,8 @@ private fun AddIntakeCard(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Quick add",
-                color = Color(0xFF25384A),
+                text = "クイック追加",
+                color = MizunomiColors.TextPrimary,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -2796,7 +2803,7 @@ private fun AddIntakeCard(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
             ) {
                 Text(
-                    text = "\uD83C\uDFA4 \u97F3\u58F0\u3067\u8A18\u9332",
+                    text = "🎤 音声で記録",
                     fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -2830,7 +2837,7 @@ private fun AmountSelectionPrompt(
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF5FC)),
+            colors = CardDefaults.cardColors(containerColor = MizunomiColors.SoftBlueBackground),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(
@@ -2838,14 +2845,14 @@ private fun AmountSelectionPrompt(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(
-                    text = "${drinkTypeDisplayLabel(selectedDrinkType)}\u3092\u9078\u629E\u4E2D",
-                    color = Color(0xFF0F5F94),
+                    text = "${drinkTypeDisplayLabel(selectedDrinkType)}を選択中",
+                    color = MizunomiColors.AccentBlueText,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "\u91CF\u3092\u9078\u3093\u3067\u8A18\u9332\u3057\u3066\u304F\u3060\u3055\u3044",
-                    color = Color(0xFF527189),
+                    text = "量を選んで記録してください",
+                    color = MizunomiColors.AccentBlueBody,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -2880,7 +2887,7 @@ private fun RecordDateTimeSelector(
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF5FC)),
+            colors = CardDefaults.cardColors(containerColor = MizunomiColors.SoftBlueBackground),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(
@@ -2889,13 +2896,13 @@ private fun RecordDateTimeSelector(
             ) {
                 Text(
                     text = "記録日時",
-                    color = Color(0xFF527189),
+                    color = MizunomiColors.AccentBlueBody,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     text = "$displayDate ${displayTime.format(DateTimeFormatter.ofPattern("HH:mm"))}",
-                    color = Color(0xFF0F5F94),
+                    color = MizunomiColors.AccentBlueText,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -2903,7 +2910,7 @@ private fun RecordDateTimeSelector(
         }
         Text(
             text = "日付",
-            color = Color(0xFF526777),
+            color = MizunomiColors.TextSecondaryDark,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
         )
@@ -2951,7 +2958,7 @@ private fun RecordDateTimeSelector(
         }
         Text(
             text = "時刻",
-            color = Color(0xFF526777),
+            color = MizunomiColors.TextSecondaryDark,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
         )
@@ -2986,7 +2993,7 @@ private fun RecordDateTimeSelector(
         errorMessage?.let { message ->
             Text(
                 text = message,
-                color = Color(0xFFB3261E),
+                color = MizunomiColors.DangerRed,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Medium,
             )
@@ -3039,7 +3046,7 @@ private fun QuickAmountGrid(
                         onClick = { onQuickAdd(amountMl) },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1683D8)),
+                        colors = ButtonDefaults.buttonColors(containerColor = MizunomiColors.AccentBlueStrong),
                         contentPadding = PaddingValues(horizontal = 8.dp),
                     ) {
                         Text(
@@ -3099,8 +3106,8 @@ private fun SelectButton(
         modifier = modifier.height(46.dp),
         shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (selected) Color(0xFFE3F3FF) else Color.White,
-            contentColor = if (selected) Color(0xFF116DAE) else Color(0xFF31485B),
+            containerColor = if (selected) MizunomiColors.SelectedBackground else MizunomiColors.CardBackground,
+            contentColor = if (selected) MizunomiColors.AccentBlueSelected else MizunomiColors.TextBody,
         ),
     ) {
         Text(
@@ -3122,7 +3129,7 @@ private fun IntakeRecordRow(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Row(
@@ -3135,19 +3142,19 @@ private fun IntakeRecordRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = drinkTypeDisplayLabel(record.drinkType),
-                    color = Color(0xFF263B4D),
+                    color = MizunomiColors.TextBodyDark,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     text = record.timestamp.toRecordDateTimeText(),
-                    color = Color(0xFF7C8A96),
+                    color = MizunomiColors.TextMuted,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = "${record.amountMl} ml",
-                    color = Color(0xFF0F2F47),
+                    color = MizunomiColors.TextPrimaryDark,
                     fontWeight = FontWeight.Bold,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -3155,15 +3162,15 @@ private fun IntakeRecordRow(
                         onClick = { onEdit(record) },
                         contentPadding = PaddingValues(horizontal = 6.dp),
                     ) {
-                        Text(text = "Edit", fontSize = 12.sp)
+                        Text(text = "編集", fontSize = 12.sp)
                     }
                     TextButton(
                         onClick = { onDelete(record) },
                         contentPadding = PaddingValues(horizontal = 6.dp),
                     ) {
                         Text(
-                            text = "Delete",
-                            color = Color(0xFFB3261E),
+                            text = "削除",
+                            color = MizunomiColors.DangerRed,
                             fontSize = 12.sp,
                         )
                     }
@@ -3207,7 +3214,7 @@ private fun buildVoiceRecognitionIntent(): Intent =
             RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
         )
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.JAPAN.toLanguageTag())
-        putExtra(RecognizerIntent.EXTRA_PROMPT, "\u98F2\u307F\u7269\u3068\u91CF\u3092\u8A71\u3057\u3066\u304F\u3060\u3055\u3044")
+        putExtra(RecognizerIntent.EXTRA_PROMPT, "飲み物と量を話してください")
     }
 
 private fun buildVoiceInputState(text: String?): VoiceInputState =
@@ -3215,7 +3222,7 @@ private fun buildVoiceInputState(text: String?): VoiceInputState =
         VoiceInputState(
             rawText = text,
             candidate = null,
-            errorMessage = "\u3046\u307E\u304F\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u98F2\u307F\u7269\u3068\u91CF\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
+            errorMessage = "うまく読み取れませんでした。飲み物と量を選んでください。",
         )
     } else {
         val candidate = parseVoiceIntake(text)
@@ -3223,7 +3230,7 @@ private fun buildVoiceInputState(text: String?): VoiceInputState =
             rawText = text,
             candidate = candidate,
             errorMessage = if (candidate == null) {
-                "\u3046\u307E\u304F\u8AAD\u307F\u53D6\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u98F2\u307F\u7269\u3068\u91CF\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002"
+                "うまく読み取れませんでした。飲み物と量を選んでください。"
             } else {
                 null
             },
@@ -3243,12 +3250,12 @@ private data class VoiceInputState(
 
 private enum class AppTab(
     val label: String,
-    val symbol: String,
+    val icon: ImageVector,
 ) {
-    Home(label = "ホーム", symbol = "⌂"),
-    Record(label = "記録", symbol = "+"),
-    History(label = "履歴", symbol = "≡"),
-    Settings(label = "設定", symbol = "⚙"),
+    Home(label = "ホーム", icon = Icons.Filled.Home),
+    Record(label = "記録", icon = Icons.Filled.Add),
+    History(label = "履歴", icon = Icons.AutoMirrored.Filled.List),
+    Settings(label = "設定", icon = Icons.Filled.Settings),
 }
 
 @Preview(showBackground = true)
@@ -3259,14 +3266,14 @@ private fun MizunomiAppPreview() {
         todayRecords = listOf(
             IntakeRecord(
                 id = 1,
-                drinkType = "\u6C34",
+                drinkType = "水",
                 amountMl = 200,
                 timestamp = 0,
                 memo = null,
             ),
             IntakeRecord(
                 id = 2,
-                drinkType = "\u304A\u8336",
+                drinkType = "お茶",
                 amountMl = 200,
                 timestamp = 0,
                 memo = null,
@@ -3275,7 +3282,7 @@ private fun MizunomiAppPreview() {
         recentRecords = listOf(
             IntakeRecord(
                 id = 1,
-                drinkType = "\u6C34",
+                drinkType = "水",
                 amountMl = 200,
                 timestamp = 0,
                 memo = null,
@@ -3284,7 +3291,7 @@ private fun MizunomiAppPreview() {
         weeklyRecords = listOf(
             IntakeRecord(
                 id = 1,
-                drinkType = "\u6C34",
+                drinkType = "水",
                 amountMl = 200,
                 timestamp = 0,
                 memo = null,
