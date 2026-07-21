@@ -49,8 +49,8 @@ object HydrationReminderNotifications {
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val title = "\u6C34\u5206\u88DC\u7D66\u306E\u30BF\u30A4\u30DF\u30F3\u30B0\u3067\u3059"
-        val body = "\u4ECA\u65E5\u306E\u30DA\u30FC\u30B9\u3088\u308A\u5C11\u3057\u9045\u308C\u3066\u3044\u307E\u3059\u3002\u307E\u305A\u306F\u4E00\u676F\u98F2\u307F\u307E\u305B\u3093\u304B\uFF1F"
+        val title = "水分補給のタイミングです"
+        val body = "今日のペースより少し遅れています。まずは一杯飲みませんか？"
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(context, ChannelId)
         } else {

@@ -7,19 +7,19 @@ import org.junit.Assert.assertNull
 class VoiceIntakeParserTest {
     @Test
     fun parsesSupportedVoiceInputs() {
-        parseVoiceIntake("\u6C34300")!!.also {
+        parseVoiceIntake("水300")!!.also {
             assertEquals(DrinkTypeWater, it.drinkType)
             assertEquals(300, it.amountMl)
         }
-        parseVoiceIntake("\u30DD\u30AB\u30EA500")!!.also {
+        parseVoiceIntake("ポカリ500")!!.also {
             assertEquals(DrinkTypeSportsDrink, it.drinkType)
             assertEquals(500, it.amountMl)
         }
-        parseVoiceIntake("\u30B3\u30FC\u30D2\u30FC\u725B\u4E73200")!!.also {
+        parseVoiceIntake("コーヒー牛乳200")!!.also {
             assertEquals(DrinkTypeMilkDrink, it.drinkType)
             assertEquals(200, it.amountMl)
         }
-        parseVoiceIntake("\u304A\u8336\uFF15\uFF10\uFF10")!!.also {
+        parseVoiceIntake("お茶５００")!!.also {
             assertEquals(DrinkTypeTea, it.drinkType)
             assertEquals(500, it.amountMl)
         }
@@ -27,13 +27,13 @@ class VoiceIntakeParserTest {
 
     @Test
     fun skipsTimeAndUsesFirstValidAmount() {
-        assertEquals(300, parseVoiceIntake("13\u6642\u306B300\u98F2\u3093\u3060")!!.amountMl)
+        assertEquals(300, parseVoiceIntake("13時に300飲んだ")!!.amountMl)
     }
 
     @Test
     fun returnsNullForMissingOrOutOfRangeAmount() {
-        assertNull(parseVoiceIntake("\u6C34\u3092\u98F2\u3093\u3060"))
-        assertNull(parseVoiceIntake("\u6C3430"))
-        assertNull(parseVoiceIntake("\u6C343000000"))
+        assertNull(parseVoiceIntake("水を飲んだ"))
+        assertNull(parseVoiceIntake("水30"))
+        assertNull(parseVoiceIntake("水3000000"))
     }
 }
