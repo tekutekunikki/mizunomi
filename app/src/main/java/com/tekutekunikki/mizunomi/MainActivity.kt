@@ -312,7 +312,7 @@ private fun MizunomiRootApp(
     var showSplash by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        delay(1_000)
+        delay(2_000)
         showSplash = false
     }
 
