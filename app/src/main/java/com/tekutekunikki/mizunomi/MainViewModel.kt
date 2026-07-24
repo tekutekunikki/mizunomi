@@ -8,20 +8,34 @@ import com.tekutekunikki.mizunomi.data.IntakeRecord
 import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
 import com.tekutekunikki.mizunomi.data.buildIntakeRecordsCsv
 import com.tekutekunikki.mizunomi.data.parseIntakeRecordsCsv
+import com.tekutekunikki.mizunomi.domain.CoachUseCase
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+sealed interface CoachUiState {
+    data object Idle : CoachUiState
+    data object Loading : CoachUiState
+    data class Success(val message: String) : CoachUiState
+    data class Error(val message: String) : CoachUiState
+}
 
 class MainViewModel(
     private val repository: IntakeRecordRepository,
     private val reminderSettingsRepository: ReminderSettingsRepository,
+    private val coachUseCase: CoachUseCase,
 ) : ViewModel() {
     val reminderEnabled: Flow<Boolean> = reminderSettingsRepository.reminderEnabled
     val dailyGoalMl: Flow<Int> = reminderSettingsRepository.dailyGoalMl
     val wakeTimeMinutes: Flow<Int> = reminderSettingsRepository.wakeTimeMinutes
     val bedTimeMinutes: Flow<Int> = reminderSettingsRepository.bedTimeMinutes
+    private val _coachUiState = MutableStateFlow<CoachUiState>(CoachUiState.Idle)
+    val coachUiState: StateFlow<CoachUiState> = _coachUiState.asStateFlow()
 
     fun observeTotalAmountForDay(date: LocalDate): Flow<Int> =
         repository.observeTotalAmountForDay(date)
@@ -120,6 +134,27 @@ class MainViewModel(
         }
     }
 
+    fun requestCoachAdvice(todayRecords: List<IntakeRecord>) {
+        viewModelScope.launch {
+            _coachUiState.value = CoachUiState.Loading
+            coachUseCase(todayRecords)
+                .onSuccess { message ->
+                    _coachUiState.value = CoachUiState.Success(message)
+                }
+                .onFailure { error ->
+                    _coachUiState.value = CoachUiState.Error(
+                        error.message ?: "コーチ機能を利用できませんでした。もう一度お試しください。",
+                    )
+                }
+        }
+    }
+
+    fun clearCoachError() {
+        if (_coachUiState.value is CoachUiState.Error) {
+            _coachUiState.value = CoachUiState.Idle
+        }
+    }
+
     fun prepareCsvExport(
         onReady: (csvContent: String) -> Unit,
         onError: (message: String) -> Unit,
@@ -170,6 +205,7 @@ class MainViewModel(
     class Factory(
         private val repository: IntakeRecordRepository,
         private val reminderSettingsRepository: ReminderSettingsRepository,
+        private val coachUseCase: CoachUseCase,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -177,6 +213,7 @@ class MainViewModel(
                 return MainViewModel(
                     repository = repository,
                     reminderSettingsRepository = reminderSettingsRepository,
+                    coachUseCase = coachUseCase,
                 ) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

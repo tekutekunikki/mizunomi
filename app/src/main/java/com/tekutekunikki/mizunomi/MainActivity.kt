@@ -53,6 +53,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -104,6 +105,8 @@ import com.tekutekunikki.mizunomi.data.IntakeRecordRepository
 import com.tekutekunikki.mizunomi.data.MaxCsvImportBytes
 import com.tekutekunikki.mizunomi.data.MizunomiDatabase
 import com.tekutekunikki.mizunomi.data.decodeUtf8Csv
+import com.tekutekunikki.mizunomi.data.remote.GeminiClient
+import com.tekutekunikki.mizunomi.domain.CoachUseCase
 import com.tekutekunikki.mizunomi.domain.DailyIntake
 import com.tekutekunikki.mizunomi.domain.DrinkNotice
 import com.tekutekunikki.mizunomi.domain.DrinkTypes
@@ -258,12 +261,16 @@ class MainActivity : ComponentActivity() {
     private val reminderSettingsRepository by lazy {
         ReminderSettingsRepository(this)
     }
+    private val coachUseCase by lazy {
+        CoachUseCase(GeminiClient())
+    }
     private val mainViewModel by lazy {
         ViewModelProvider(
             this,
             MainViewModel.Factory(
                 repository = repository,
                 reminderSettingsRepository = reminderSettingsRepository,
+                coachUseCase = coachUseCase,
             ),
         )[MainViewModel::class.java]
     }
@@ -380,6 +387,8 @@ fun MizunomiApp(
         .collectAsState(initial = DefaultWakeTimeMinutes)
     val bedTimeMinutes by viewModel.bedTimeMinutes
         .collectAsState(initial = DefaultBedTimeMinutes)
+    val coachUiState by viewModel.coachUiState
+        .collectAsState(initial = CoachUiState.Idle)
 
     MizunomiAppContent(
         todayTotalMl = todayTotalMl,
@@ -392,6 +401,7 @@ fun MizunomiApp(
         dailyGoalMl = dailyGoalMl,
         wakeTimeMinutes = wakeTimeMinutes,
         bedTimeMinutes = bedTimeMinutes,
+        coachUiState = coachUiState,
         currentDate = currentDate,
         onRefreshCurrentDate = onRefreshCurrentDate,
         onAddRecord = { drinkType, amountMl, timestamp, recordDate, onSaved, onError ->
@@ -425,6 +435,12 @@ fun MizunomiApp(
         onBedTimeChange = { minutes ->
             viewModel.setBedTimeMinutes(minutes)
         },
+        onCoachAdviceRequest = {
+            viewModel.requestCoachAdvice(todayRecords)
+        },
+        onCoachErrorShown = {
+            viewModel.clearCoachError()
+        },
         onDisplayedWeekStartChange = { requestedWeekStart ->
             onRefreshCurrentDate()
             val normalizedWeekStart = requestedWeekStart.startOfWeek()
@@ -456,6 +472,7 @@ fun MizunomiAppContent(
     dailyGoalMl: Int,
     wakeTimeMinutes: Int,
     bedTimeMinutes: Int,
+    coachUiState: CoachUiState,
     currentDate: LocalDate,
     onRefreshCurrentDate: () -> Unit,
     onAddRecord: (
@@ -473,6 +490,8 @@ fun MizunomiAppContent(
     onDailyGoalChange: (Int) -> Unit,
     onWakeTimeChange: (Int) -> Unit,
     onBedTimeChange: (Int) -> Unit,
+    onCoachAdviceRequest: () -> Unit,
+    onCoachErrorShown: () -> Unit,
     onDisplayedWeekStartChange: (LocalDate) -> Unit,
     onPrepareCsvExport: (
         onReady: (csvContent: String) -> Unit,
@@ -738,6 +757,14 @@ fun MizunomiAppContent(
                 .sumOf { it.amountMl },
         )
     }.filter { it.amountMl > 0 }
+    LaunchedEffect(coachUiState) {
+        val errorState = coachUiState as? CoachUiState.Error ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(
+            message = errorState.message,
+            duration = SnackbarDuration.Short,
+        )
+        onCoachErrorShown()
+    }
 
     MaterialTheme {
         pendingCsvImport?.let { preview ->
@@ -838,7 +865,9 @@ fun MizunomiAppContent(
                         quickRecordOptions = HomeQuickRecordOptions,
                         quickRecordStatus = homeQuickRecordStatus,
                         isQuickRecordSaving = isHomeQuickRecordSaving,
+                        coachUiState = coachUiState,
                         onQuickRecord = addHomeQuickRecord,
+                        onCoachAdviceRequest = onCoachAdviceRequest,
                         onGoToRecordTab = {
                             dismissSnackbar()
                             selectedTab = AppTab.Record
@@ -1005,7 +1034,9 @@ private fun HomeTabContent(
     quickRecordOptions: List<HomeQuickRecordOption>,
     quickRecordStatus: HomeQuickRecordStatus?,
     isQuickRecordSaving: Boolean,
+    coachUiState: CoachUiState,
     onQuickRecord: (HomeQuickRecordOption) -> Unit,
+    onCoachAdviceRequest: () -> Unit,
     onGoToRecordTab: () -> Unit,
     onScrollStarted: () -> Unit,
 ) {
@@ -1023,6 +1054,12 @@ private fun HomeTabContent(
         }
         item { PaceStatusCard(status = paceStatus) }
         item {
+            CoachCard(
+                state = coachUiState,
+                onCoachAdviceRequest = onCoachAdviceRequest,
+            )
+        }
+        item {
             HomeQuickRecordCard(
                 options = quickRecordOptions,
                 status = quickRecordStatus,
@@ -1035,6 +1072,85 @@ private fun HomeTabContent(
             item { DrinkNoticeCard(notices = drinkNotices) }
         }
         item { HydrationGuideSection(topics = HydrationGuideTopics) }
+    }
+}
+
+@Composable
+private fun CoachCard(
+    state: CoachUiState,
+    onCoachAdviceRequest: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MizunomiColors.CardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "コーチに相談",
+                    color = MizunomiColors.TextPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "今日の記録をもとに、次の一杯をやさしく提案します。",
+                    color = MizunomiColors.TextSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            Button(
+                onClick = onCoachAdviceRequest,
+                enabled = state !is CoachUiState.Loading,
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MizunomiColors.AccentBlueStrong),
+            ) {
+                if (state is CoachUiState.Loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .width(18.dp)
+                            .height(18.dp),
+                        color = MizunomiColors.CardBackground,
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = "相談中…")
+                } else {
+                    Text(text = "コーチに相談")
+                }
+            }
+
+            when (state) {
+                CoachUiState.Idle,
+                is CoachUiState.Error -> Unit
+
+                CoachUiState.Loading -> Text(
+                    text = "コーチが今日の飲み方を確認しています。",
+                    color = MizunomiColors.TextSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                is CoachUiState.Success -> Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MizunomiColors.SoftBlueBackground),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                ) {
+                    Text(
+                        text = state.message,
+                        modifier = Modifier.padding(14.dp),
+                        color = MizunomiColors.TextBody,
+                        style = MaterialTheme.typography.bodyMedium,
+                        lineHeight = 20.sp,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -3303,6 +3419,7 @@ private fun MizunomiAppPreview() {
         dailyGoalMl = DefaultDailyGoalMl,
         wakeTimeMinutes = DefaultWakeTimeMinutes,
         bedTimeMinutes = DefaultBedTimeMinutes,
+        coachUiState = CoachUiState.Idle,
         currentDate = LocalDate.now(),
         onRefreshCurrentDate = {},
         onAddRecord = { _, amountMl, _, _, onSaved, _ -> onSaved(99, 400 + amountMl) },
@@ -3313,6 +3430,8 @@ private fun MizunomiAppPreview() {
         onDailyGoalChange = {},
         onWakeTimeChange = {},
         onBedTimeChange = {},
+        onCoachAdviceRequest = {},
+        onCoachErrorShown = {},
         onDisplayedWeekStartChange = {},
         onPrepareCsvExport = { onReady, _ -> onReady("date,time,drinkType,amountMl,memo\n") },
         onAnalyzeCsvImport = { _, onReady, _ ->

@@ -1,9 +1,19 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use(::load)
+    }
+}
+val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY").orEmpty()
 
 val testKeystoreFile = providers.environmentVariable("MIZUNOMI_UPLOAD_KEYSTORE_FILE").orNull
 val testKeystorePassword = providers.environmentVariable("MIZUNOMI_UPLOAD_KEYSTORE_PASSWORD").orNull
@@ -39,6 +49,7 @@ android {
         targetSdk = 35
         versionCode = resolvedVersionCode
         versionName = "1.0"
+        buildConfigField("String", "GEMINI_API_KEY", "\"${geminiApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
 
     signingConfigs {
@@ -58,6 +69,10 @@ android {
                 signingConfig = signingConfigs.getByName("testDistribution")
             }
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
